@@ -191,7 +191,7 @@ io.on('connection', (socket) => {
           const newSegmentPos = getDelayedPosition(player.positionHistory, DELAY_MS) || { x: player.x, y: player.y };
           player.queue.push(newSegmentPos);
           // Met à jour la taille
-          player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
+          player.length = BASE_SIZE * (1 + player.queue.length * 0.01);
           // Retirer l'item
           roomsData[roomId].items.splice(i, 1);
           i--;
