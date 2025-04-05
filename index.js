@@ -19,6 +19,9 @@ const io = new Server(httpServer, { cors: { origin: "*" } });
 
 const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD133', '#8F33FF'];
 const worldSize = { width: 2000, height: 2000 };
+const ITEM_RADIUS = 10; // rayon de l'item
+const BASE_SIZE = 20;   // taille de base du joueur
+const DELAY_MS = 100;   // délai en millisecondes par segment
 
 // Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
@@ -36,6 +39,9 @@ function generateRandomItems(count, worldSize) {
 }
 
 // Rooms en mémoire
+// Pour chaque room, on stocke :
+// - players: chaque joueur possède {x,y, length, queue, positionHistory}
+// - items: tableau d'items
 const roomsData = {};
 
 async function findOrCreateRoom() {
@@ -89,6 +95,22 @@ async function leaveRoom(roomId) {
     .eq('id', roomId);
 }
 
+// Fonction utilitaire pour récupérer la position d'un joueur avec un délai donné (en ms)
+// On parcourt la positionHistory pour trouver la position la plus proche du timestamp requis.
+function getDelayedPosition(positionHistory, delay) {
+  const targetTime = Date.now() - delay;
+  // Si aucune historique, renvoie null
+  if (!positionHistory || positionHistory.length === 0) return null;
+  // On parcourt la liste depuis la fin (positions les plus récentes)
+  for (let i = positionHistory.length - 1; i >= 0; i--) {
+    if (positionHistory[i].time <= targetTime) {
+      return { x: positionHistory[i].x, y: positionHistory[i].y };
+    }
+  }
+  // Si aucune position n'est suffisamment ancienne, renvoie la plus ancienne
+  return { x: positionHistory[0].x, y: positionHistory[0].y };
+}
+
 io.on('connection', (socket) => {
   console.log('Nouveau client connecté:', socket.id);
   (async () => {
@@ -101,7 +123,7 @@ io.on('connection', (socket) => {
     const roomId = room.id;
     console.log(`Le joueur ${socket.id} rejoint la room ${roomId}`);
 
-    // Initialise la structure de la room si nécessaire
+    // Initialise la room si nécessaire
     if (!roomsData[roomId]) {
       roomsData[roomId] = {
         players: {},
@@ -109,12 +131,13 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Ajoute le joueur dans la room, en initialisant une queue vide
+    // Initialiser le joueur avec une queue vide et un historique de positions vide
     roomsData[roomId].players[socket.id] = {
       x: Math.random() * 800,
       y: Math.random() * 600,
-      length: 20,
-      queue: [] // Nouvelle propriété 'queue' pour stocker les positions de la queue
+      length: BASE_SIZE,
+      queue: [],           // Queue initialement vide
+      positionHistory: []  // Historique des positions (objets {x, y, time})
     };
 
     socket.join(roomId);
@@ -122,57 +145,67 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('update_players', roomsData[roomId].players);
     io.to(roomId).emit('update_items', roomsData[roomId].items);
 
-    // Gestion du mouvement et mise à jour de la queue
+    // Gestion du mouvement
     socket.on('move', (data) => {
       let player = roomsData[roomId].players[socket.id];
       if (!player) return;
       
-      // Sauvegarder la position actuelle (avant mise à jour) pour la queue
-      const oldHead = { x: player.x, y: player.y };
-
-      // Mise à jour de la position de la tête
-      player.x = data.x;
-      player.y = data.y;
-      
-      // Mise à jour de la queue :
-      // Si la queue existe, décaler chaque élément pour qu'il suive la position précédente.
-      if (player.queue && player.queue.length > 0) {
-        for (let i = player.queue.length - 1; i > 0; i--) {
-          player.queue[i] = { ...player.queue[i - 1] };
-        }
-        player.queue[0] = oldHead;
+      // Ajoute la position actuelle à l'historique avec timestamp
+      player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
+      // Pour éviter que l'historique ne devienne trop grand, on garde seulement les 100 dernières positions
+      if (player.positionHistory.length > 100) {
+        player.positionHistory.shift();
       }
       
-      // Vérifier collision avec chaque item
-      if (roomsData[roomId].items) {
-        for (let i = 0; i < roomsData[roomId].items.length; i++) {
-          const item = roomsData[roomId].items[i];
-          const dist = Math.hypot(player.x - item.x, player.y - item.y);
-          if (dist < 20) { // Seuil de collision
-            // Lorsqu'un item est mangé, on ajoute un nouvel élément dans la queue
-            const tailPos = (player.queue && player.queue.length > 0)
-              ? player.queue[player.queue.length - 1]
-              : { x: player.x, y: player.y };
-            if (!player.queue) player.queue = [];
-            player.queue.push({ x: tailPos.x, y: tailPos.y });
-            // Recalcule la taille : taille de base * (1 + nombre d'éléments dans la queue * 0.1)
-            const baseSize = 20;
-            player.length = baseSize * (1 + player.queue.length * 0.1);
-            // Retirer l'item
-            roomsData[roomId].items.splice(i, 1);
-            i--;
-            // Créer un nouvel item aléatoire
-            const newItem = {
-              id: `item-${Date.now()}`,
-              x: Math.random() * worldSize.width,
-              y: Math.random() * worldSize.height,
-              value: Math.floor(Math.random() * 5) + 1,
-              color: itemColors[Math.floor(Math.random() * itemColors.length)]
-            };
-            roomsData[roomId].items.push(newItem);
-            io.to(roomId).emit('update_items', roomsData[roomId].items);
-            break;
+      // Sauvegarder l'ancienne position (pour le calcul de la queue)
+      const oldHead = { x: player.x, y: player.y };
+
+      // Mettre à jour la tête
+      player.x = data.x;
+      player.y = data.y;
+
+      // Mettre à jour la queue pour chaque élément avec un délai
+      // Pour le i-ème élément, on souhaite une position d'il y a (i+1)*DELAY_MS ms
+      if (player.queue) {
+        for (let i = 0; i < player.queue.length; i++) {
+          const delay = (i + 1) * DELAY_MS;
+          const delayedPos = getDelayedPosition(player.positionHistory, delay);
+          if (delayedPos) {
+            player.queue[i] = delayedPos;
           }
+        }
+      }
+      
+      // Vérifier la collision avec chaque item (collision sur toute la hitbox)
+      // On considère le joueur comme un cercle de rayon = (playerSize / 2)
+      const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.1));
+      const playerRadius = playerSize / 2;
+      for (let i = 0; i < roomsData[roomId].items.length; i++) {
+        const item = roomsData[roomId].items[i];
+        // Supposons que l'item a un rayon fixe
+        const itemRadius = 10;
+        const dist = Math.hypot(player.x - item.x, player.y - item.y);
+        if (dist < (playerRadius + itemRadius)) {
+          // Collision : le joueur mange l'item
+          // On ajoute un nouvel élément dans la queue : on prend la position dans l'historique correspondant à DELAY_MS ms
+          const newSegmentPos = getDelayedPosition(player.positionHistory, DELAY_MS) || { x: player.x, y: player.y };
+          player.queue.push(newSegmentPos);
+          // Met à jour la taille
+          player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
+          // Retirer l'item
+          roomsData[roomId].items.splice(i, 1);
+          i--;
+          // Créer un nouvel item aléatoire
+          const newItem = {
+            id: `item-${Date.now()}`,
+            x: Math.random() * worldSize.width,
+            y: Math.random() * worldSize.height,
+            value: Math.floor(Math.random() * 5) + 1,
+            color: itemColors[Math.floor(Math.random() * itemColors.length)]
+          };
+          roomsData[roomId].items.push(newItem);
+          io.to(roomId).emit('update_items', roomsData[roomId].items);
+          break;
         }
       }
       io.to(roomId).emit('update_players', roomsData[roomId].players);
