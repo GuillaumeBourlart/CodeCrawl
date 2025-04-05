@@ -135,16 +135,43 @@ io.on('connection', (socket) => {
           const dist = Math.hypot(player.x - item.x, player.y - item.y);
           if (dist < 20) { // Seuil de collision
             // Le joueur mange l'item : ajouter un segment
-            if (!player.segments) player.segments = [];
-            player.segments.push({ x: player.x, y: player.y });
+
+            // S’il y a déjà des segments, on récupère la position du dernier segment.
+// Sinon, on récupère la position actuelle du joueur.
+const tailPos = (player.segments.length > 0)
+  ? player.segments[player.segments.length - 1]
+  : { x: player.x, y: player.y };
+
+// On ajoute le nouveau segment à la position du "bout de la queue"
+player.segments.push({ x: tailPos.x, y: tailPos.y });
+
+            // Recalcule la taille : taille de base * (1 + nombre_de_segments * 0.1)
+const baseSize = 20;
+player.length = baseSize * (1 + player.segments.length * 0.1);
+
+
             // Recalcule la taille : taille de base * (1 + nombre_de_segments * 0.1)
             const baseSize = 20;
             player.length = baseSize * (1 + player.segments.length * 0.1);
             // Retire l'item
             roomsData[roomId].items.splice(i, 1);
             i--;
+            // On crée un nouvel item aléatoire
+const newItem = {
+  id: `item-${Date.now()}`,
+  x: Math.random() * worldSize.width,
+  y: Math.random() * worldSize.height,
+  value: Math.floor(Math.random() * 5) + 1,
+  color: itemColors[Math.floor(Math.random() * itemColors.length)]
+};
+
+// On l'ajoute au tableau
+roomsData[roomId].items.push(newItem);
+
+// On notifie les clients
+io.to(roomId).emit('update_items', roomsData[roomId].items);
             // Notifie tous les clients que les items ont changé
-            io.to(roomId).emit('update_items', roomsData[roomId].items);
+            
             break;
           }
         }
