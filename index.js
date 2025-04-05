@@ -16,13 +16,13 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
+
 const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD133', '#8F33FF'];
 const worldSize = { width: 2000, height: 2000 };
 
 // Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
   const items = [];
-  const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD133', '#8F33FF'];
   for (let i = 0; i < count; i++) {
     items.push({
       id: `item-${i}-${Date.now()}`,
@@ -109,12 +109,12 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Ajoute le joueur dans la room
+    // Ajoute le joueur dans la room, en initialisant une queue vide
     roomsData[roomId].players[socket.id] = {
       x: Math.random() * 800,
       y: Math.random() * 600,
       length: 20,
-      segments: [] // queue vide initialement
+      queue: [] // Nouvelle propriété 'queue' pour stocker les positions de la queue
     };
 
     socket.join(roomId);
@@ -122,51 +122,55 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('update_players', roomsData[roomId].players);
     io.to(roomId).emit('update_items', roomsData[roomId].items);
 
-    // Gestion du mouvement et vérification de collision avec les items
+    // Gestion du mouvement et mise à jour de la queue
     socket.on('move', (data) => {
       let player = roomsData[roomId].players[socket.id];
       if (!player) return;
+      
+      // Sauvegarder la position actuelle (avant mise à jour) pour la queue
+      const oldHead = { x: player.x, y: player.y };
+
+      // Mise à jour de la position de la tête
       player.x = data.x;
       player.y = data.y;
+      
+      // Mise à jour de la queue :
+      // Si la queue existe, décaler chaque élément pour qu'il suive la position précédente.
+      if (player.queue && player.queue.length > 0) {
+        for (let i = player.queue.length - 1; i > 0; i--) {
+          player.queue[i] = { ...player.queue[i - 1] };
+        }
+        player.queue[0] = oldHead;
+      }
+      
       // Vérifier collision avec chaque item
       if (roomsData[roomId].items) {
         for (let i = 0; i < roomsData[roomId].items.length; i++) {
           const item = roomsData[roomId].items[i];
           const dist = Math.hypot(player.x - item.x, player.y - item.y);
           if (dist < 20) { // Seuil de collision
-            // Le joueur mange l'item : ajouter un segment
-
-            // S’il y a déjà des segments, on récupère la position du dernier segment.
-// Sinon, on récupère la position actuelle du joueur.
-const tailPos = (player.segments.length > 0)
-  ? player.segments[player.segments.length - 1]
-  : { x: player.x, y: player.y };
-
-// On ajoute le nouveau segment à la position du "bout de la queue"
-player.segments.push({ x: tailPos.x, y: tailPos.y });
-
-            // Recalcule la taille : taille de base * (1 + nombre_de_segments * 0.1)
+            // Lorsqu'un item est mangé, on ajoute un nouvel élément dans la queue
+            const tailPos = (player.queue && player.queue.length > 0)
+              ? player.queue[player.queue.length - 1]
+              : { x: player.x, y: player.y };
+            if (!player.queue) player.queue = [];
+            player.queue.push({ x: tailPos.x, y: tailPos.y });
+            // Recalcule la taille : taille de base * (1 + nombre d'éléments dans la queue * 0.1)
             const baseSize = 20;
-            player.length = baseSize * (1 + player.segments.length * 0.1);
-            // Retire l'item
+            player.length = baseSize * (1 + player.queue.length * 0.1);
+            // Retirer l'item
             roomsData[roomId].items.splice(i, 1);
             i--;
-            // On crée un nouvel item aléatoire
-const newItem = {
-  id: `item-${Date.now()}`,
-  x: Math.random() * worldSize.width,
-  y: Math.random() * worldSize.height,
-  value: Math.floor(Math.random() * 5) + 1,
-  color: itemColors[Math.floor(Math.random() * itemColors.length)]
-};
-
-// On l'ajoute au tableau
-roomsData[roomId].items.push(newItem);
-
-// On notifie les clients
-io.to(roomId).emit('update_items', roomsData[roomId].items);
-            // Notifie tous les clients que les items ont changé
-            
+            // Créer un nouvel item aléatoire
+            const newItem = {
+              id: `item-${Date.now()}`,
+              x: Math.random() * worldSize.width,
+              y: Math.random() * worldSize.height,
+              value: Math.floor(Math.random() * 5) + 1,
+              color: itemColors[Math.floor(Math.random() * itemColors.length)]
+            };
+            roomsData[roomId].items.push(newItem);
+            io.to(roomId).emit('update_items', roomsData[roomId].items);
             break;
           }
         }
