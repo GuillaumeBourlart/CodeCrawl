@@ -146,11 +146,6 @@ const tailPos = (player.segments.length > 0)
 player.segments.push({ x: tailPos.x, y: tailPos.y });
 
             // Recalcule la taille : taille de base * (1 + nombre_de_segments * 0.1)
-const baseSize = 20;
-player.length = baseSize * (1 + player.segments.length * 0.1);
-
-
-            // Recalcule la taille : taille de base * (1 + nombre_de_segments * 0.1)
             const baseSize = 20;
             player.length = baseSize * (1 + player.segments.length * 0.1);
             // Retire l'item
