@@ -15,13 +15,27 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const app = express();
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-  },
-});
+const io = new Server(httpServer, { cors: { origin: "*" } });
 
-// Rooms en mémoire (démonstration)
+const worldSize = { width: 2000, height: 2000 };
+
+// Génère des items aléatoires pour une room
+function generateRandomItems(count, worldSize) {
+  const items = [];
+  const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD133', '#8F33FF'];
+  for (let i = 0; i < count; i++) {
+    items.push({
+      id: `item-${i}-${Date.now()}`,
+      x: Math.random() * worldSize.width,
+      y: Math.random() * worldSize.height,
+      value: Math.floor(Math.random() * 5) + 1,
+      color: itemColors[Math.floor(Math.random() * itemColors.length)]
+    });
+  }
+  return items;
+}
+
+// Rooms en mémoire
 const roomsData = {};
 
 async function findOrCreateRoom() {
@@ -31,16 +45,13 @@ async function findOrCreateRoom() {
     .lt('current_players', 25)
     .order('current_players', { ascending: true })
     .limit(1);
-
   if (error) {
     console.error('Erreur Supabase:', error);
     return null;
   }
-
   let room = (existingRooms && existingRooms.length > 0)
     ? existingRooms[0]
     : null;
-
   if (!room) {
     const { data: newRoomData, error: newRoomError } = await supabase
       .from('rooms')
@@ -53,12 +64,10 @@ async function findOrCreateRoom() {
     }
     room = newRoomData;
   }
-
   await supabase
     .from('rooms')
     .update({ current_players: room.current_players + 1 })
     .eq('id', room.id);
-
   return room;
 }
 
@@ -69,14 +78,11 @@ async function leaveRoom(roomId) {
     .select('current_players')
     .eq('id', roomId)
     .single();
-
   if (!data || error) {
     console.error('Erreur lecture room:', error);
     return;
   }
-
   const newCount = Math.max(0, data.current_players - 1);
-
   await supabase
     .from('rooms')
     .update({ current_players: newCount })
@@ -95,26 +101,73 @@ io.on('connection', (socket) => {
     const roomId = room.id;
     console.log(`Le joueur ${socket.id} rejoint la room ${roomId}`);
 
+    // Initialise la structure de la room si nécessaire
     if (!roomsData[roomId]) {
-      roomsData[roomId] = { players: {} };
+      roomsData[roomId] = {
+        players: {},
+        items: generateRandomItems(50, worldSize)
+      };
     }
 
+    // Ajoute le joueur dans la room
     roomsData[roomId].players[socket.id] = {
       x: Math.random() * 800,
       y: Math.random() * 600,
-      length: 10
+      length: 20,
+      segments: [] // queue vide initialement
     };
 
     socket.join(roomId);
     socket.emit('joined_room', { roomId });
     io.to(roomId).emit('update_players', roomsData[roomId].players);
+    io.to(roomId).emit('update_items', roomsData[roomId].items);
 
+    // Gestion du mouvement et vérification de collision avec les items
     socket.on('move', (data) => {
       let player = roomsData[roomId].players[socket.id];
       if (!player) return;
       player.x = data.x;
       player.y = data.y;
-      // TODO: collisions
+      // Vérifier collision avec chaque item
+      if (roomsData[roomId].items) {
+        for (let i = 0; i < roomsData[roomId].items.length; i++) {
+          const item = roomsData[roomId].items[i];
+          const dist = Math.hypot(player.x - item.x, player.y - item.y);
+          if (dist < 20) { // Seuil de collision
+            // Le joueur mange l'item : ajouter un segment
+            if (!player.segments) player.segments = [];
+            player.segments.push({ x: player.x, y: player.y });
+            // Recalcule la taille : taille de base * (1 + nombre_de_segments * 0.1)
+            const baseSize = 20;
+            player.length = baseSize * (1 + player.segments.length * 0.1);
+            // Retire l'item
+            roomsData[roomId].items.splice(i, 1);
+            i--;
+            // Notifie tous les clients que les items ont changé
+            io.to(roomId).emit('update_items', roomsData[roomId].items);
+            break;
+          }
+        }
+      }
+      io.to(roomId).emit('update_players', roomsData[roomId].players);
+    });
+
+    // Gestion du boost : active pendant 3 secondes
+    socket.on('boost', () => {
+      let player = roomsData[roomId].players[socket.id];
+      if (!player) return;
+      player.boosting = true;
+      io.to(roomId).emit('update_players', roomsData[roomId].players);
+      setTimeout(() => {
+        player.boosting = false;
+        io.to(roomId).emit('update_players', roomsData[roomId].players);
+      }, 3000);
+    });
+
+    // Gestion d'une éventuelle élimination
+    socket.on('player_eliminated', (data) => {
+      console.log(`Player ${socket.id} éliminé par ${data.eliminatedBy}`);
+      delete roomsData[roomId].players[socket.id];
       io.to(roomId).emit('update_players', roomsData[roomId].players);
     });
 
