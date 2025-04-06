@@ -22,6 +22,24 @@ const DELAY_MS = 50;       // Décalage par défaut (ms) pour la mise à jour de
 const SPEED_NORMAL = 2;
 const SPEED_BOOST = 4;
 
+// -- Fonction utilitaire pour "nettoyer" les joueurs avant envoi au client
+function getPlayersForUpdate(players) {
+  const result = {};
+  for (const [id, player] of Object.entries(players)) {
+    result[id] = {
+      x: player.x,
+      y: player.y,
+      direction: player.direction,
+      boosting: player.boosting,
+      color: player.color,
+      length: player.length,
+      queue: player.queue,
+      itemEatenCount: player.itemEatenCount
+    };
+  }
+  return result;
+}
+
 // Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
   const items = [];
@@ -100,6 +118,7 @@ async function leaveRoom(roomId) {
 
 io.on('connection', (socket) => {
   console.log('Nouveau client connecté:', socket.id);
+
   (async () => {
     const room = await findOrCreateRoom();
     if (!room) {
@@ -139,7 +158,8 @@ io.on('connection', (socket) => {
 
     socket.join(roomId);
     socket.emit('joined_room', { roomId });
-    io.to(roomId).emit('update_players', roomsData[roomId].players);
+    // Utiliser getPlayersForUpdate pour ne pas envoyer de champs problématiques
+    io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
     io.to(roomId).emit('update_items', roomsData[roomId].items);
 
     // Le client change seulement la direction via "changeDirection"
@@ -163,14 +183,14 @@ io.on('connection', (socket) => {
           // Retirer le dernier segment (celui le plus éloigné)
           player.queue.pop();
           player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
-          io.to(roomId).emit('update_players', roomsData[roomId].players);
+          io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
         } else {
           clearInterval(player.boostInterval);
           player.boosting = false;
-          io.to(roomId).emit('update_players', roomsData[roomId].players);
+          io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
         }
       }, 500);
-      io.to(roomId).emit('update_players', roomsData[roomId].players);
+      io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
     });
 
     socket.on('boostStop', () => {
@@ -179,14 +199,14 @@ io.on('connection', (socket) => {
       if (player.boosting) {
         clearInterval(player.boostInterval);
         player.boosting = false;
-        io.to(roomId).emit('update_players', roomsData[roomId].players);
+        io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
       }
     });
 
     socket.on('player_eliminated', (data) => {
       console.log(`Player ${socket.id} éliminé par ${data.eliminatedBy}`);
       delete roomsData[roomId].players[socket.id];
-      io.to(roomId).emit('update_players', roomsData[roomId].players);
+      io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
     });
 
     socket.on('disconnect', async () => {
@@ -195,7 +215,7 @@ io.on('connection', (socket) => {
         delete roomsData[roomId].players[socket.id];
       }
       await leaveRoom(roomId);
-      io.to(roomId).emit('update_players', roomsData[roomId].players);
+      io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
     });
   })();
 });
@@ -205,80 +225,80 @@ setInterval(() => {
   Object.keys(roomsData).forEach(roomId => {
     const room = roomsData[roomId];
     Object.entries(room.players).forEach(([id, player]) => {
-      if (player.direction) {
-        // Sauvegarder la position actuelle dans l'historique
-        player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
-        if (player.positionHistory.length > 200) {
-          player.positionHistory.shift();
+      if (!player.direction) return;
+
+      // Sauvegarder la position actuelle dans l'historique
+      player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
+      if (player.positionHistory.length > 200) {
+        player.positionHistory.shift();
+      }
+
+      // Calculer la vitesse (boost ou normal)
+      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
+      player.x += player.direction.x * speed;
+      player.y += player.direction.y * speed;
+
+      // Pour le calcul de l'espacement, on calcule un "fixedDelay"
+      // La distance désirée entre les centres doit être égale à la taille du joueur
+      const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
+      const fixedDelay = (playerSize / speed) * 10; // ms
+
+      // Mise à jour de la queue : pour chaque segment, récupérer la position différée
+      for (let i = 0; i < player.queue.length; i++) {
+        const delay = (i + 1) * fixedDelay;
+        const delayedPos = getDelayedPosition(player.positionHistory, delay);
+        if (delayedPos) {
+          player.queue[i] = delayedPos;
+        } else {
+          // Si pas trouvé, on cale la position sur la tête
+          player.queue[i] = { x: player.x, y: player.y };
         }
+      }
 
-        // Calculer la vitesse (boost ou normal)
-        const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-        player.x += player.direction.x * speed;
-        player.y += player.direction.y * speed;
+      // Vérifier collisions avec les parois
+      if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
+        io.to(roomId).emit("player_eliminated", { eliminatedBy: "boundary" });
+        delete room.players[id];
+        return;
+      }
 
-        // Pour le calcul de l'espacement, on calcule un "fixedDelay"
-        // La distance désirée entre les centres doit être égale à la taille du joueur
-        const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
-        const fixedDelay = (playerSize / (player.boosting ? SPEED_BOOST : SPEED_NORMAL)) * 10;
-
-        // Mise à jour de la queue : pour chaque segment, récupérer la position différée avec (i+1) * fixedDelay
-        for (let i = 0; i < player.queue.length; i++) {
-          const delay = (i + 1) * fixedDelay;
-          const delayedPos = getDelayedPosition(player.positionHistory, delay);
-          if (delayedPos) {
-            player.queue[i] = delayedPos;
-          } else {
-            player.queue[i] = { x: player.x, y: player.y };
+      // Vérifier collision avec les items (hitbox circulaire)
+      const playerRadius = playerSize / 2;
+      for (let i = 0; i < room.items.length; i++) {
+        const item = room.items[i];
+        const dist = Math.hypot(player.x - item.x, player.y - item.y);
+        if (dist < (playerRadius + ITEM_RADIUS)) {
+          // Le joueur mange l'item
+          player.itemEatenCount = (player.itemEatenCount || 0) + 1;
+          const expectedSegments = getExpectedSegments(player.itemEatenCount);
+          if (player.queue.length < expectedSegments) {
+            const newSegmentPos = getDelayedPosition(
+              player.positionHistory,
+              (player.queue.length + 1) * fixedDelay
+            ) || { x: player.x, y: player.y };
+            player.queue.push(newSegmentPos);
           }
-        }
+          player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
+          room.items.splice(i, 1);
+          i--;
 
-        // Vérifier collisions avec les parois
-        if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
-          io.to(roomId).emit("player_eliminated", { eliminatedBy: "boundary" });
-          delete room.players[id];
-          return;
-        }
-
-        // Vérifier collision avec les items (hitbox circulaire)
-        const playerRadius = playerSize / 2;
-        for (let i = 0; i < room.items.length; i++) {
-          const item = room.items[i];
-          const dist = Math.hypot(player.x - item.x, player.y - item.y);
-          if (dist < (playerRadius + ITEM_RADIUS)) {
-            // Le joueur mange l'item
-            player.itemEatenCount = (player.itemEatenCount || 0) + 1;
-            const expectedSegments = getExpectedSegments(player.itemEatenCount);
-            if (player.queue.length < expectedSegments) {
-              const newSegmentPos = getDelayedPosition(player.positionHistory, (player.queue.length + 1) * fixedDelay)
-                || { x: player.x, y: player.y };
-              player.queue.push(newSegmentPos);
-            }
-            player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
-            room.items.splice(i, 1);
-            i--;
-            const newItem = {
-              id: `item-${Date.now()}`,
-              x: Math.random() * worldSize.width,
-              y: Math.random() * worldSize.height,
-              value: Math.floor(Math.random() * 5) + 1,
-              color: itemColors[Math.floor(Math.random() * itemColors.length)]
-            };
-            room.items.push(newItem);
-            io.to(roomId).emit('update_items', room.items);
-            break;
-          }
+          // Générez un nouvel item pour garder un total constant
+          const newItem = {
+            id: `item-${Date.now()}`,
+            x: Math.random() * worldSize.width,
+            y: Math.random() * worldSize.height,
+            value: Math.floor(Math.random() * 5) + 1,
+            color: itemColors[Math.floor(Math.random() * itemColors.length)]
+          };
+          room.items.push(newItem);
+          io.to(roomId).emit('update_items', room.items);
+          break;
         }
       }
     });
 
-    // Avant d'envoyer aux clients, supprimer les propriétés inutiles pour éviter les références circulaires
-    const playersForUpdate = {};
-    Object.entries(room.players).forEach(([id, player]) => {
-      const { positionHistory, boostInterval, ...cleanPlayer } = player;
-      playersForUpdate[id] = cleanPlayer;
-    });
-    io.to(roomId).emit('update_players', playersForUpdate);
+    // Envoyer l'état des joueurs « nettoyé » à tous
+    io.to(roomId).emit('update_players', getPlayersForUpdate(room.players));
   });
 }, 10);
 
