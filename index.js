@@ -158,42 +158,37 @@ io.on('connection', (socket) => {
 
     socket.join(roomId);
     socket.emit('joined_room', { roomId });
-    // Utiliser getPlayersForUpdate pour ne pas envoyer de champs problématiques
     io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
     io.to(roomId).emit('update_items', roomsData[roomId].items);
 
     // Le client change seulement la direction via "changeDirection"
-  socket.on('changeDirection', (data) => {
-  const player = roomsData[roomId].players[socket.id];
-  if (!player) return;
-  const { x, y } = data.direction;
-  const mag = Math.sqrt(x * x + y * y) || 1;
-  let newDir = { x: x / mag, y: y / mag };
+    socket.on('changeDirection', (data) => {
+      const player = roomsData[roomId].players[socket.id];
+      if (!player) return;
+      const { x, y } = data.direction;
+      const mag = Math.sqrt(x * x + y * y) || 1;
+      let newDir = { x: x / mag, y: y / mag };
 
-  // Limiter le changement de direction pour éviter un demi-tour brutal
-  const currentDir = player.direction;
-  // Calcul du produit scalaire pour obtenir l'angle entre les vecteurs
-  const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
-  const clampedDot = Math.min(Math.max(dot, -1), 1);
-  const angleDiff = Math.acos(clampedDot);
-  const maxAngle = Math.PI / 6; // 30° maximum au lieu de 60°
+      // Limiter le changement de direction pour éviter un demi-tour brutal (max 30°)
+      const currentDir = player.direction;
+      const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
+      const clampedDot = Math.min(Math.max(dot, -1), 1);
+      const angleDiff = Math.acos(clampedDot);
+      const maxAngle = Math.PI / 6; // 30° maximum
 
-  if (angleDiff > maxAngle) {
-    // Calculer le signe de la rotation (produit vectoriel)
-    const cross = currentDir.x * newDir.y - currentDir.y * newDir.x;
-    const sign = cross >= 0 ? 1 : -1;
-    // Fonction pour faire pivoter un vecteur d'un angle (en radians)
-    function rotateVector(vec, angle) {
-      return {
-        x: vec.x * Math.cos(angle) - vec.y * Math.sin(angle),
-        y: vec.x * Math.sin(angle) + vec.y * Math.cos(angle)
-      };
-    }
-    newDir = rotateVector(currentDir, sign * maxAngle);
-  }
-  player.direction = newDir;
-});
-
+      if (angleDiff > maxAngle) {
+        const cross = currentDir.x * newDir.y - currentDir.y * newDir.x;
+        const sign = cross >= 0 ? 1 : -1;
+        function rotateVector(vec, angle) {
+          return {
+            x: vec.x * Math.cos(angle) - vec.y * Math.sin(angle),
+            y: vec.x * Math.sin(angle) + vec.y * Math.cos(angle)
+          };
+        }
+        newDir = rotateVector(currentDir, sign * maxAngle);
+      }
+      player.direction = newDir;
+    });
 
     // Gestion du boost via "boostStart" et "boostStop"
     socket.on('boostStart', () => {
@@ -204,7 +199,19 @@ io.on('connection', (socket) => {
       player.boosting = true;
       player.boostInterval = setInterval(() => {
         if (player.queue.length > 0) {
-          // Retirer le dernier segment (celui le plus éloigné)
+          // Avant de retirer le segment, créer un item "déposé" à cet emplacement
+          const droppedSegment = player.queue[player.queue.length - 1];
+          const droppedItem = {
+            id: `dropped-${Date.now()}`,
+            x: droppedSegment.x,
+            y: droppedSegment.y,
+            value: 0, // valeur 0 pour un segment déposé
+            color: player.color
+          };
+          // Ajouter l'item déposé dans les items (pour qu'il soit dessiné sur le terrain)
+          roomsData[roomId].items.push(droppedItem);
+
+          // Retirer le dernier segment de la queue
           player.queue.pop();
           player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
           io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
@@ -274,7 +281,6 @@ setInterval(() => {
         if (delayedPos) {
           player.queue[i] = delayedPos;
         } else {
-          // Si pas trouvé, on cale la position sur la tête
           player.queue[i] = { x: player.x, y: player.y };
         }
       }
@@ -286,12 +292,14 @@ setInterval(() => {
         return;
       }
 
-      // Vérifier collision avec les items (hitbox circulaire)
+      // Vérifier collision avec les items
+      // Ajout d'une "auréole" : le halo est égal à 10% de la taille du joueur
+      const haloMargin = playerSize * 0.1;
       const playerRadius = playerSize / 2;
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
         const dist = Math.hypot(player.x - item.x, player.y - item.y);
-        if (dist < (playerRadius + ITEM_RADIUS)) {
+        if (dist < (playerRadius + ITEM_RADIUS + haloMargin)) {
           // Le joueur mange l'item
           player.itemEatenCount = (player.itemEatenCount || 0) + 1;
           const expectedSegments = getExpectedSegments(player.itemEatenCount);
@@ -305,8 +313,7 @@ setInterval(() => {
           player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
           room.items.splice(i, 1);
           i--;
-
-          // Générez un nouvel item pour garder un total constant
+          // Générer un nouvel item pour garder le total constant
           const newItem = {
             id: `item-${Date.now()}`,
             x: Math.random() * worldSize.width,
@@ -320,8 +327,6 @@ setInterval(() => {
         }
       }
     });
-
-    // Envoyer l'état des joueurs « nettoyé » à tous
     io.to(roomId).emit('update_players', getPlayersForUpdate(room.players));
   });
 }, 10);
