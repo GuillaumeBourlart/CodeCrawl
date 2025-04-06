@@ -18,6 +18,8 @@ const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;
 const BASE_SIZE = 20;
 const MAX_ITEMS = 50; // Nombre maximum d'items autorisés
+const DELAY_MS = 50;  // Valeur de base pour le calcul du delay
+
 // Vitesse
 const SPEED_NORMAL = 2;
 const SPEED_BOOST = 4;
@@ -73,7 +75,7 @@ function getExpectedSegments(itemEatenCount) {
   return 5 + Math.floor((itemEatenCount - 5) / 10);
 }
 
-// Rooms en mémoire
+// Rooms en mémoire (chaque room stocke ses joueurs et ses items)
 const roomsData = {};
 
 async function findOrCreateRoom() {
@@ -173,7 +175,6 @@ io.on('connection', (socket) => {
       const { x, y } = data.direction;
       const mag = Math.sqrt(x * x + y * y) || 1;
       let newDir = { x: x / mag, y: y / mag };
-
       // Limiter le changement de direction
       const currentDir = player.direction;
       const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
@@ -234,21 +235,18 @@ io.on('connection', (socket) => {
 
     // Boost stop
     socket.on('boostStop', () => {
-  console.log(`boostStop déclenché par ${socket.id}`);
-  const player = roomsData[roomId].players[socket.id];
-  if (!player) return;
-  if (player.boosting) {
-    clearInterval(player.boostInterval);
-    player.boosting = false;
-    // Réinitialiser l'historique pour recalculer instantanément la queue
-    player.positionHistory = [{ x: player.x, y: player.y, time: Date.now() }];
-    // Optionnel : vider la file et la reconstruire si besoin
-    // player.queue = [];
-    console.log(`Boost arrêté pour ${socket.id} et historique réinitialisé.`);
-    io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
-  }
-});
-
+      console.log(`boostStop déclenché par ${socket.id}`);
+      const player = roomsData[roomId].players[socket.id];
+      if (!player) return;
+      if (player.boosting) {
+        clearInterval(player.boostInterval);
+        player.boosting = false;
+        // Réinitialiser l'historique pour recalculer immédiatement la queue
+        player.positionHistory = [{ x: player.x, y: player.y, time: Date.now() }];
+        console.log(`Boost arrêté pour ${socket.id} et historique réinitialisé.`);
+        io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
+      }
+    });
 
     // Player eliminated event (côté client)
     socket.on('player_eliminated', (data) => {
@@ -290,7 +288,7 @@ setInterval(() => {
         const size1 = BASE_SIZE * (1 + (player1.queue.length * 0.1));
         const size2 = BASE_SIZE * (1 + (player2.queue.length * 0.1));
         if (distance < (size1 + size2) / 2) {
-          // Collision frontale
+          // Vérifier s'ils se font face (collision frontale)
           const dot = player1.direction.x * player2.direction.x + player1.direction.y * player2.direction.y;
           if (dot < -0.8) {
             console.log(`Collision frontale détectée entre ${id1} et ${id2}. Élimination mutuelle.`);
@@ -315,16 +313,16 @@ setInterval(() => {
 
       // Vitesse
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-      // Mettre à jour position
+      // Mise à jour de la position
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
 
-      // Calculer le délai fixe pour l'espacement
-      // On revient à l'ancienne formule: (playerSize / speed) * 10
+      // Calcul du delay : utiliser DELAY_MS /2 si boost, sinon DELAY_MS
+      const delayFactor = player.boosting ? DELAY_MS / 2 : DELAY_MS;
       const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
-      const fixedDelay = (playerSize / speed) * 10;
+      const fixedDelay = (playerSize / speed) * delayFactor;
 
-      // Mise à jour de la queue
+      // Mise à jour de la queue (basée sur l'historique)
       for (let i = 0; i < player.queue.length; i++) {
         const delay = (i + 1) * fixedDelay;
         const delayedPos = getDelayedPosition(player.positionHistory, delay);
@@ -335,7 +333,7 @@ setInterval(() => {
         }
       }
 
-      // Collision parois
+      // Collision avec les parois
       if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
         console.log(`Le joueur ${id} a touché une paroi. Élimination.`);
         io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
@@ -343,7 +341,7 @@ setInterval(() => {
         return;
       }
 
-      // Collision items
+      // Collision avec les items
       const haloMargin = playerSize * 0.1;
       const playerRadius = playerSize / 2;
       for (let i = 0; i < room.items.length; i++) {
@@ -353,19 +351,13 @@ setInterval(() => {
           player.itemEatenCount = (player.itemEatenCount || 0) + 1;
           const expectedSegments = getExpectedSegments(player.itemEatenCount);
           if (player.queue.length < expectedSegments) {
-            const newSegmentPos = getDelayedPosition(
-              player.positionHistory,
-              (player.queue.length + 1) * fixedDelay
-            ) || { x: player.x, y: player.y };
+            const newSegmentPos = getDelayedPosition(player.positionHistory, (player.queue.length + 1) * fixedDelay) || { x: player.x, y: player.y };
             player.queue.push(newSegmentPos);
           }
           player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
-
-          // Retirer l'item mangé
           room.items.splice(i, 1);
           i--;
-
-          // Respawn uniquement si le nombre d'items < MAX_ITEMS
+          // Respawn d'un nouvel item uniquement si room.items.length < MAX_ITEMS
           if (room.items.length < MAX_ITEMS) {
             const newItem = {
               id: `item-${Date.now()}`,
@@ -381,7 +373,6 @@ setInterval(() => {
         }
       }
     });
-    // Mise à jour de tous les joueurs
     io.to(roomId).emit('update_players', getPlayersForUpdate(room.players));
   });
 }, 10);
