@@ -16,14 +16,15 @@ const io = new Server(httpServer, { cors: { origin: "*" } });
 const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD133', '#8F33FF'];
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;
-const BASE_SIZE = 20; // Espacement constant souhaité
+const BASE_SIZE = 20; // Taille de base d'un cercle
 const MAX_ITEMS = 50; // Nombre maximum d'items autorisés
+const DELAY_MS = 50;  // Valeur de base pour le calcul du delay
 
 // Vitesse
 const SPEED_NORMAL = 2;
 const SPEED_BOOST = 4;
 
-// Prépare l'état des joueurs à envoyer aux clients
+// Fonction pour préparer l'état des joueurs à envoyer aux clients
 function getPlayersForUpdate(players) {
   const result = {};
   for (const [id, player] of Object.entries(players)) {
@@ -33,7 +34,7 @@ function getPlayersForUpdate(players) {
       direction: player.direction,
       boosting: player.boosting,
       color: player.color,
-      // On garde une taille constante pour le joueur
+      // On renvoie la taille de base pour l'affichage
       length: BASE_SIZE,
       queue: player.queue,
       itemEatenCount: player.itemEatenCount
@@ -138,7 +139,7 @@ io.on('connection', (socket) => {
       };
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
-    // Initialiser le joueur avec un historique vide pour les positions (positionHistory)
+    // Initialiser le joueur avec un historique vide
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -149,8 +150,8 @@ io.on('connection', (socket) => {
       x: Math.random() * 800,
       y: Math.random() * 600,
       length: BASE_SIZE,
-      queue: [], // La file des segments
-      positionHistory: [], // Historique des positions de la tête
+      queue: [],
+      positionHistory: [],
       direction: defaultDirection,
       boosting: false,
       color: randomColor,
@@ -278,7 +279,7 @@ setInterval(() => {
         const dx = player1.x - player2.x;
         const dy = player1.y - player2.y;
         const distance = Math.hypot(dx, dy);
-        if (distance < BASE_SIZE) {
+        if (distance < BASE_SIZE) { // Si les têtes se touchent
           const dot = player1.direction.x * player2.direction.x + player1.direction.y * player2.direction.y;
           if (dot < -0.8) {
             console.log(`Collision frontale détectée entre ${id1} et ${id2}. Élimination mutuelle.`);
@@ -306,8 +307,9 @@ setInterval(() => {
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
 
-      // Calcul du delay fixe : temps nécessaire pour parcourir BASE_SIZE
-      const fixedDelay = BASE_SIZE / speed; // En ms (si speed en pixels/ms)
+      // Calcul du delay fixe : temps nécessaire pour parcourir la taille actuelle d'un cercle
+      const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.1);
+      const fixedDelay = currentCircleSize / speed;
 
       // Mise à jour de la file basée sur l'historique
       for (let i = 0; i < player.queue.length; i++) {
@@ -344,6 +346,7 @@ setInterval(() => {
           }
           room.items.splice(i, 1);
           i--;
+          // Respawn d'un nouvel item si nécessaire
           if (room.items.length < MAX_ITEMS) {
             const newItem = {
               id: `item-${Date.now()}`,
