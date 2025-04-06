@@ -14,11 +14,11 @@ const io = new Server(httpServer, { cors: { origin: "*" } });
 
 const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD133', '#8F33FF'];
 const worldSize = { width: 2000, height: 2000 };
-const ITEM_RADIUS = 10;   // Rayon de l'item
-const BASE_SIZE = 20;     // Taille de base du joueur
-const DELAY_MS = 50;      // Délai (en ms) pour la mise à jour du premier segment
+const ITEM_RADIUS = 10;  // Rayon fixe de l'item
+const BASE_SIZE = 20;    // Taille de base du joueur
+const DELAY_MS = 300;     // Délai en ms pour le premier segment
 
-// Génère des items aléatoires pour une room
+// Génère un tableau d'items aléatoires pour la room
 function generateRandomItems(count, worldSize) {
   const items = [];
   for (let i = 0; i < count; i++) {
@@ -33,10 +33,10 @@ function generateRandomItems(count, worldSize) {
   return items;
 }
 
-// Rooms en mémoire
-// Chaque room stocke :
-// - players: { x, y, length, queue, positionHistory, direction, boosting, lastBoostTime, itemEatenCount, color }
-// - items: tableau d'items
+// Les rooms en mémoire
+// Pour chaque room, on stocke :
+// - players : { x, y, length, queue, positionHistory, direction, boosting, lastBoostTime, itemEatenCount, color }
+// - items : tableau d'items
 const roomsData = {};
 
 async function findOrCreateRoom() {
@@ -82,7 +82,7 @@ async function leaveRoom(roomId) {
   await supabase.from('rooms').update({ current_players: newCount }).eq('id', roomId);
 }
 
-// Retourne la position différée dans l'historique, selon le délai (en ms)
+// Retourne la position différée dans l'historique selon le délai (en ms)
 function getDelayedPosition(positionHistory, delay) {
   const targetTime = Date.now() - delay;
   if (!positionHistory || positionHistory.length === 0) return null;
@@ -113,7 +113,7 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Initialiser le joueur avec une position aléatoire, une queue vide, un historique vide, une direction aléatoire et une couleur
+    // Initialiser le joueur
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -146,7 +146,7 @@ io.on('connection', (socket) => {
       player.direction = { x: x / mag, y: y / mag };
     });
 
-    // Gestion du boost (cooldown de 7 sec)
+    // Gestion du boost avec cooldown de 7 sec
     socket.on('boost', () => {
       let player = roomsData[roomId].players[socket.id];
       if (!player) return;
@@ -195,13 +195,13 @@ setInterval(() => {
           player.positionHistory.shift();
         }
 
-        // Mise à jour de la queue
+        // Mise à jour de la queue :
         // Si la queue n'est pas vide, on met à jour le premier segment avec la position différée de 50 ms
+        // et les segments suivants copient la position du segment précédent
         if (player.queue.length > 0) {
           if (!player.lastQueueUpdateTime || Date.now() - player.lastQueueUpdateTime >= 50) {
             const newFirst = getDelayedPosition(player.positionHistory, 50) || { x: player.x, y: player.y };
             player.queue[0] = newFirst;
-            // Pour les segments suivants, ils prennent la position du segment précédent
             for (let i = 1; i < player.queue.length; i++) {
               player.queue[i] = { ...player.queue[i - 1] };
             }
@@ -225,16 +225,16 @@ setInterval(() => {
           if (dist < (playerRadius + ITEM_RADIUS)) {
             // Collision : le joueur mange l'item
             player.itemEatenCount = (player.itemEatenCount || 0) + 1;
-            // Règle d'ajout de segments dans la queue :
-            // - Si la queue a moins de 5 segments, on ajoute un segment à chaque collision.
-            // - Sinon, on ajoute un segment seulement tous les 10 items mangés.
+            // Ajout de segment dans la queue selon la règle :
+            // Si la queue contient moins de 5 segments, ajouter pour chaque item mangé.
+            // Sinon, ajouter un segment seulement tous les 10 items mangés.
             if (player.queue.length < 5 || (player.itemEatenCount % 10 === 0)) {
               const newSegmentPos = getDelayedPosition(player.positionHistory, 50) || { x: player.x, y: player.y };
               player.queue.push(newSegmentPos);
             }
-            // Met à jour la taille du joueur
+            // Mise à jour de la taille
             player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
-            // Supprimer l'item et en générer un nouveau
+            // Supprimer l'item et générer un nouveau
             room.items.splice(i, 1);
             i--;
             const newItem = {
