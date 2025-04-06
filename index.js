@@ -45,7 +45,8 @@ function generateRandomItems(count, worldSize) {
   const items = [];
   for (let i = 0; i < count; i++) {
     items.push({
-      id: item-${i}-${Date.now()},
+      id: `item-${i}-${Date.now()}`,
+
       x: Math.random() * worldSize.width,
       y: Math.random() * worldSize.height,
       value: Math.floor(Math.random() * 5) + 1,
