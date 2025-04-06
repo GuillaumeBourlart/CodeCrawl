@@ -45,7 +45,7 @@ function generateRandomItems(count, worldSize) {
   const items = [];
   for (let i = 0; i < count; i++) {
     items.push({
-      id: `item-${i}-${Date.now()}`,
+      id: item-${i}-${Date.now()},
       x: Math.random() * worldSize.width,
       y: Math.random() * worldSize.height,
       value: Math.floor(Math.random() * 5) + 1,
@@ -127,7 +127,7 @@ io.on('connection', (socket) => {
       return;
     }
     const roomId = room.id;
-    console.log(`Le joueur ${socket.id} rejoint la room ${roomId}`);
+    console.log(Le joueur ${socket.id} rejoint la room ${roomId});
 
     if (!roomsData[roomId]) {
       roomsData[roomId] = {
@@ -192,38 +192,53 @@ io.on('connection', (socket) => {
 
     // Gestion du boost via "boostStart" et "boostStop"
     socket.on('boostStart', () => {
-      const player = roomsData[roomId].players[socket.id];
-      if (!player) return;
-      if (player.queue.length === 0) return; // Ne peut pas booster sans segments
-      if (player.boosting) return;
-      player.boosting = true;
-      player.boostInterval = setInterval(() => {
-        if (player.queue.length > 0) {
-          // Avant de retirer le segment, créer un item "déposé" à cet emplacement
-          const droppedSegment = player.queue[player.queue.length - 1];
-          const droppedItem = {
-            id: `dropped-${Date.now()}`,
-            x: droppedSegment.x,
-            y: droppedSegment.y,
-            value: 0, // valeur 0 pour un segment déposé
-            color: player.color
-          };
-          // Ajouter l'item déposé dans les items (pour qu'il soit dessiné sur le terrain)
-          roomsData[roomId].items.push(droppedItem);
-           // Émettre l'événement update_items pour que le client mette à jour les items
-          io.to(roomId).emit('update_items', roomsData[roomId].items);
-          // Retirer le dernier segment de la queue
-          player.queue.pop();
-          player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
-          io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
-        } else {
-          clearInterval(player.boostInterval);
-          player.boosting = false;
-          io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
-        }
-      }, 500);
+  const player = roomsData[roomId].players[socket.id];
+  if (!player) return;
+  if (player.queue.length === 0) return; // Ne peut pas booster sans segments
+  if (player.boosting) return;
+
+  // Retirer immédiatement un segment
+  const droppedSegment = player.queue.pop();
+  if (droppedSegment) {
+    const droppedItem = {
+      id: dropped-${Date.now()},
+      x: droppedSegment.x,
+      y: droppedSegment.y,
+      value: 0, // valeur 0 pour un segment déposé
+      color: player.color
+    };
+    roomsData[roomId].items.push(droppedItem);
+    io.to(roomId).emit('update_items', roomsData[roomId].items);
+    player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
+    io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
+  }
+
+  // Lancer le boost avec un intervalle de 50ms
+  player.boosting = true;
+  player.boostInterval = setInterval(() => {
+    if (player.queue.length > 0) {
+      const droppedSegment = player.queue.pop();
+      if (droppedSegment) {
+        const droppedItem = {
+          id: dropped-${Date.now()},
+          x: droppedSegment.x,
+          y: droppedSegment.y,
+          value: 0,
+          color: player.color
+        };
+        roomsData[roomId].items.push(droppedItem);
+        io.to(roomId).emit('update_items', roomsData[roomId].items);
+      }
+      player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
       io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
-    });
+    } else {
+      clearInterval(player.boostInterval);
+      player.boosting = false;
+      io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
+    }
+  }, 50);
+});
+
 
     
 
@@ -237,11 +252,16 @@ io.on('connection', (socket) => {
       }
     });
 
+    
+
     socket.on('player_eliminated', (data) => {
-      console.log(`Player ${socket.id} éliminé par ${data.eliminatedBy}`);
-      delete roomsData[roomId].players[socket.id];
-      io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
-    });
+  console.log(Player ${socket.id} éliminé par ${data.eliminatedBy});
+  delete roomsData[roomId].players[socket.id];
+  io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
+  // Déconnecter le joueur
+  socket.disconnect();
+});
+
 
     socket.on('disconnect', async () => {
       console.log('Déconnexion:', socket.id);
@@ -318,7 +338,7 @@ setInterval(() => {
           i--;
           // Générer un nouvel item pour garder le total constant
           const newItem = {
-            id: `item-${Date.now()}`,
+            id: item-${Date.now()},
             x: Math.random() * worldSize.width,
             y: Math.random() * worldSize.height,
             value: Math.floor(Math.random() * 5) + 1,
@@ -339,5 +359,5 @@ app.get('/', (req, res) => {
 });
 
 httpServer.listen(PORT, () => {
-  console.log(`Serveur démarré sur le port ${PORT}`);
+  console.log(Serveur démarré sur le port ${PORT});
 });
