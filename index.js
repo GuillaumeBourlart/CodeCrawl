@@ -16,9 +16,9 @@ const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;    // Rayon fixe de l'item
 const BASE_SIZE = 20;      // Taille de base du joueur
-const DELAY_MS = 50;       // Valeur de base pour le délai (sera recalculée dynamiquement)
+const DELAY_MS = 50;       // Valeur de base pour la mise à jour (en ms)
 
-// Vitesse en pixels par intervalle (chaque 10 ms)
+// Vitesse (en pixels par intervalle de 10 ms)
 const SPEED_NORMAL = 2;
 const SPEED_BOOST = 4;
 
@@ -49,13 +49,13 @@ function getDelayedPosition(positionHistory, delay) {
   return { x: positionHistory[0].x, y: positionHistory[0].y };
 }
 
-// Retourne le nombre de segments attendus en fonction des items mangés
+// Retourne le nombre de segments attendus en fonction du nombre d'items mangés
 function getExpectedSegments(itemEatenCount) {
   if (itemEatenCount < 5) return itemEatenCount;
   return 5 + Math.floor((itemEatenCount - 5) / 10);
 }
 
-// Rooms en mémoire : chaque room stocke ses joueurs et ses items
+// Rooms en mémoire
 const roomsData = {};
 
 async function findOrCreateRoom() {
@@ -116,8 +116,7 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Initialiser le joueur avec une position aléatoire, queue et historique vides,
-    // une direction aléatoire, une couleur aléatoire, etc.
+    // Initialiser le joueur avec une position aléatoire, queue et historique vides, direction, couleur, etc.
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -194,7 +193,6 @@ setInterval(() => {
 
         // Calculer la vitesse actuelle
         const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-        // Mise à jour de la position du joueur
         player.x += player.direction.x * speed;
         player.y += player.direction.y * speed;
 
@@ -204,16 +202,15 @@ setInterval(() => {
           player.positionHistory.shift();
         }
 
-        // Pour garantir un espacement constant, on calcule le délai requis pour parcourir une distance égale à la taille du segment.
-        // La taille du joueur est définie comme BASE_SIZE * (1 + (nombre_de_segments * 0.1))
+        // Pour garantir un espacement constant, on calcule la taille du joueur
         const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.1));
-        // Le délai requis est : (playerSize / speed) * interval (où interval = 10 ms)
-        const dynamicDelay = (playerSize / speed) * 10;
+        // Ici, on fixe le délai en se basant sur la vitesse normale (SPEED_NORMAL) pour que l'espacement reste constant
+        const fixedDelay = (playerSize / SPEED_NORMAL) * 10;
 
         // Mise à jour de la queue :
-        // Pour chaque segment, utiliser un décalage de (i+1) * dynamicDelay
+        // Pour chaque segment existant, utiliser un décalage de (i+1) * fixedDelay
         for (let i = 0; i < player.queue.length; i++) {
-          const delay = (i + 1) * dynamicDelay;
+          const delay = (i + 1) * fixedDelay;
           const delayedPos = getDelayedPosition(player.positionHistory, delay);
           if (delayedPos) {
             player.queue[i] = delayedPos;
@@ -222,14 +219,14 @@ setInterval(() => {
           }
         }
 
-        // Vérifier les collisions avec les parois
+        // Vérifier collisions avec les parois
         if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
           io.to(roomId).emit("player_eliminated", { eliminatedBy: "boundary" });
           delete room.players[id];
           return;
         }
 
-        // Vérifier les collisions avec les items (hitbox circulaire)
+        // Vérifier collision avec les items (hitbox circulaire)
         const playerRadius = playerSize / 2;
         for (let i = 0; i < room.items.length; i++) {
           const item = room.items[i];
@@ -239,8 +236,10 @@ setInterval(() => {
             player.itemEatenCount = (player.itemEatenCount || 0) + 1;
             const expectedSegments = getExpectedSegments(player.itemEatenCount);
             if (player.queue.length < expectedSegments) {
-              const newSegmentPos = getDelayedPosition(player.positionHistory, (player.queue.length + 1) * dynamicDelay)
-                || { x: player.x, y: player.y };
+              const newSegmentPos = getDelayedPosition(
+                player.positionHistory,
+                (player.queue.length + 1) * fixedDelay
+              ) || { x: player.x, y: player.y };
               player.queue.push(newSegmentPos);
             }
             player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
