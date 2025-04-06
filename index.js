@@ -204,7 +204,8 @@ io.on('connection', (socket) => {
           // Avant de retirer le segment, créer un item "déposé" à cet emplacement
           const droppedSegment = player.queue[player.queue.length - 1];
           const droppedItem = {
-            id: dropped-${Date.now()},
+          id: `dropped-${Date.now()}`,
+
             x: droppedSegment.x,
             y: droppedSegment.y,
             value: 0, // valeur 0 pour un segment déposé
@@ -240,7 +241,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('player_eliminated', (data) => {
-      console.log(Player ${socket.id} éliminé par ${data.eliminatedBy});
+      console.log(`Player ${socket.id} éliminé par ${data.eliminatedBy}`);
       delete roomsData[roomId].players[socket.id];
       io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
     });
@@ -320,7 +321,8 @@ setInterval(() => {
           i--;
           // Générer un nouvel item pour garder le total constant
           const newItem = {
-            id: item-${Date.now()},
+          id: `item-${Date.now()}`,
+
             x: Math.random() * worldSize.width,
             y: Math.random() * worldSize.height,
             value: Math.floor(Math.random() * 5) + 1,
@@ -341,5 +343,6 @@ app.get('/', (req, res) => {
 });
 
 httpServer.listen(PORT, () => {
-  console.log(Serveur démarré sur le port ${PORT});
+console.log(`Serveur démarré sur le port ${PORT}`);
+
 });
