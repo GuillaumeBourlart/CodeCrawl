@@ -224,7 +224,7 @@ setInterval(() => {
         }
 
         // Vérifier collision avec les items (hitbox circulaire)
-        const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.01));
+        const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.001));
         const playerRadius = playerSize / 2;
         for (let i = 0; i < room.items.length; i++) {
           const item = room.items[i];
@@ -234,7 +234,7 @@ setInterval(() => {
             const newSegmentPos = getDelayedPosition(player.positionHistory, DELAY_MS) || { x: player.x, y: player.y };
             player.queue.push(newSegmentPos);
             // Mise à jour de la taille (formule ajustable)
-            player.length = BASE_SIZE * (1 + player.queue.length * 0.01);
+            player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
             room.items.splice(i, 1);
             i--;
             // Générer un nouvel item aléatoire
