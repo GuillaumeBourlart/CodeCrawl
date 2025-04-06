@@ -16,11 +16,11 @@ const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;    // Rayon fixe de l'item
 const BASE_SIZE = 20;      // Taille de base du joueur
-const DELAY_MS = 30;       // Valeur de base pour la mise à jour (en ms)
+const DELAY_MS = 50;       // Décalage par défaut (ms) pour la mise à jour des segments
 
-// Vitesse (en pixels par intervalle de 10 ms)
+// Vitesse (en pixels par intervalle)
 const SPEED_NORMAL = 2;
-const SPEED_BOOST = 3;
+const SPEED_BOOST = 4;
 
 // Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
@@ -116,7 +116,7 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Initialiser le joueur avec une position aléatoire, queue et historique vides, direction, couleur, etc.
+    // Initialiser le joueur avec position aléatoire, queue et historique vides, direction, couleur, etc.
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -191,7 +191,7 @@ setInterval(() => {
         // Sauvegarder la position de la tête avant mise à jour
         const previousHead = { x: player.x, y: player.y };
 
-        // Calculer la vitesse actuelle
+        // Calcul de la vitesse (boost ou normal)
         const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
         player.x += player.direction.x * speed;
         player.y += player.direction.y * speed;
@@ -202,15 +202,14 @@ setInterval(() => {
           player.positionHistory.shift();
         }
 
-        // Pour garantir un espacement constant, on calcule la taille du joueur
-        const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.1));
-        // Ici, on fixe le délai en se basant sur la vitesse normale (SPEED_NORMAL) pour que l'espacement reste constant
-        const fixedDelay = (playerSize / SPEED_NORMAL) * 10;
+        // Pour que l'espacement reste constant (indépendamment du boost),
+        // on utilise toujours le même "currentDelay" basé sur la vitesse normale.
+        const currentDelay = DELAY_MS;
 
         // Mise à jour de la queue :
-        // Pour chaque segment existant, utiliser un décalage de (i+1) * fixedDelay
+        // Pour chaque segment existant, on met à jour sa position en utilisant (i+1) * currentDelay
         for (let i = 0; i < player.queue.length; i++) {
-          const delay = (i + 1) * fixedDelay;
+          const delay = (i + 1) * currentDelay;
           const delayedPos = getDelayedPosition(player.positionHistory, delay);
           if (delayedPos) {
             player.queue[i] = delayedPos;
@@ -227,6 +226,7 @@ setInterval(() => {
         }
 
         // Vérifier collision avec les items (hitbox circulaire)
+        const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.1));
         const playerRadius = playerSize / 2;
         for (let i = 0; i < room.items.length; i++) {
           const item = room.items[i];
@@ -238,7 +238,7 @@ setInterval(() => {
             if (player.queue.length < expectedSegments) {
               const newSegmentPos = getDelayedPosition(
                 player.positionHistory,
-                (player.queue.length + 1) * fixedDelay
+                (player.queue.length + 1) * currentDelay
               ) || { x: player.x, y: player.y };
               player.queue.push(newSegmentPos);
             }
