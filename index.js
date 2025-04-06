@@ -16,15 +16,14 @@ const io = new Server(httpServer, { cors: { origin: "*" } });
 const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD133', '#8F33FF'];
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;
-const BASE_SIZE = 20;
+const BASE_SIZE = 20; // Taille constante pour le joueur et l'espacement entre segments
 const MAX_ITEMS = 50; // Nombre maximum d'items autorisés
-const DELAY_MS = 50;  // Valeur de base pour le calcul du delay
 
 // Vitesse
 const SPEED_NORMAL = 2;
 const SPEED_BOOST = 4;
 
-// Nettoyer les joueurs avant envoi au client
+// Pour la gestion des joueurs à renvoyer au client
 function getPlayersForUpdate(players) {
   const result = {};
   for (const [id, player] of Object.entries(players)) {
@@ -34,7 +33,8 @@ function getPlayersForUpdate(players) {
       direction: player.direction,
       boosting: player.boosting,
       color: player.color,
-      length: player.length,
+      // La taille reste constante (BASE_SIZE)
+      length: BASE_SIZE,
       queue: player.queue,
       itemEatenCount: player.itemEatenCount
     };
@@ -57,25 +57,9 @@ function generateRandomItems(count, worldSize) {
   return items;
 }
 
-// Retourne la position différée dans l'historique selon le délai (ms)
-function getDelayedPosition(positionHistory, delay) {
-  const targetTime = Date.now() - delay;
-  if (!positionHistory || positionHistory.length === 0) return null;
-  for (let i = positionHistory.length - 1; i >= 0; i--) {
-    if (positionHistory[i].time <= targetTime) {
-      return { x: positionHistory[i].x, y: positionHistory[i].y };
-    }
-  }
-  return { x: positionHistory[0].x, y: positionHistory[0].y };
-}
-
-// Retourne le nombre de segments attendus en fonction des items mangés
-function getExpectedSegments(itemEatenCount) {
-  if (itemEatenCount < 5) return itemEatenCount;
-  return 5 + Math.floor((itemEatenCount - 5) / 10);
-}
-
-// Rooms en mémoire (chaque room stocke ses joueurs et ses items)
+// Ici, on n'utilise plus l'historique pour les segments.
+  
+// Rooms en mémoire
 const roomsData = {};
 
 async function findOrCreateRoom() {
@@ -152,13 +136,12 @@ io.on('connection', (socket) => {
       x: Math.random() * 800,
       y: Math.random() * 600,
       length: BASE_SIZE,
-      queue: [],
-      positionHistory: [],
+      queue: [], // Initialement vide
+      // On n'utilise plus positionHistory pour le suivi
       direction: defaultDirection,
       boosting: false,
       color: randomColor,
-      itemEatenCount: 0,
-      lastQueueUpdateTime: 0
+      itemEatenCount: 0
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
 
@@ -207,8 +190,11 @@ io.on('connection', (socket) => {
       }
       if (player.boosting) return;
       player.boosting = true;
+      // Pendant le boost, on utilise toujours la même méthode de mise à jour (contrainte de distance fixe)
+      // Le boost n'influence plus l'espacement
       player.boostInterval = setInterval(() => {
         if (player.queue.length > 0) {
+          // On transforme le dernier segment en item
           const droppedSegment = player.queue[player.queue.length - 1];
           const droppedItem = {
             id: `dropped-${Date.now()}`,
@@ -221,7 +207,6 @@ io.on('connection', (socket) => {
           console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
           io.to(roomId).emit('update_items', roomsData[roomId].items);
           player.queue.pop();
-          player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
           io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
         } else {
           clearInterval(player.boostInterval);
@@ -241,9 +226,7 @@ io.on('connection', (socket) => {
       if (player.boosting) {
         clearInterval(player.boostInterval);
         player.boosting = false;
-        // Réinitialiser l'historique pour recalculer immédiatement la queue
-        player.positionHistory = [{ x: player.x, y: player.y, time: Date.now() }];
-        console.log(`Boost arrêté pour ${socket.id} et historique réinitialisé.`);
+        console.log(`Boost arrêté pour ${socket.id}`);
         io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
       }
     });
@@ -285,10 +268,7 @@ setInterval(() => {
         const dx = player1.x - player2.x;
         const dy = player1.y - player2.y;
         const distance = Math.hypot(dx, dy);
-        const size1 = BASE_SIZE * (1 + (player1.queue.length * 0.1));
-        const size2 = BASE_SIZE * (1 + (player2.queue.length * 0.1));
-        if (distance < (size1 + size2) / 2) {
-          // Vérifier s'ils se font face (collision frontale)
+        if (distance < BASE_SIZE) { // Si les têtes se touchent
           const dot = player1.direction.x * player2.direction.x + player1.direction.y * player2.direction.y;
           if (dot < -0.8) {
             console.log(`Collision frontale détectée entre ${id1} et ${id2}. Élimination mutuelle.`);
@@ -305,31 +285,26 @@ setInterval(() => {
     Object.entries(room.players).forEach(([id, player]) => {
       if (!player.direction) return;
 
-      // Historique de position
-      player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
-      if (player.positionHistory.length > 10000) {
-        player.positionHistory.shift();
-      }
-
-      // Vitesse
+      // Mettre à jour la tête
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-      // Mise à jour de la position
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
 
-      // Calcul du delay : utiliser DELAY_MS /2 si boost, sinon DELAY_MS
-      const delayFactor = player.boosting ? DELAY_MS / 2 : DELAY_MS;
-      const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
-      const fixedDelay = (playerSize / speed) * delayFactor;
-
-      // Mise à jour de la queue (basée sur l'historique)
+      // Mise à jour de la queue par contrainte de distance fixe
+      // On veut que chaque segment reste exactement à BASE_SIZE derrière le segment précédent.
+      const spacing = BASE_SIZE;
       for (let i = 0; i < player.queue.length; i++) {
-        const delay = (i + 1) * fixedDelay;
-        const delayedPos = getDelayedPosition(player.positionHistory, delay);
-        if (delayedPos) {
-          player.queue[i] = delayedPos;
+        const leader = i === 0 ? { x: player.x, y: player.y } : player.queue[i - 1];
+        const seg = player.queue[i];
+        const dx = seg.x - leader.x;
+        const dy = seg.y - leader.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist === 0) {
+          seg.x = leader.x;
+          seg.y = leader.y;
         } else {
-          player.queue[i] = { x: player.x, y: player.y };
+          seg.x = leader.x + (dx / dist) * spacing;
+          seg.y = leader.y + (dy / dist) * spacing;
         }
       }
 
@@ -342,22 +317,25 @@ setInterval(() => {
       }
 
       // Collision avec les items
-      const haloMargin = playerSize * 0.1;
-      const playerRadius = playerSize / 2;
+      const haloMargin = BASE_SIZE * 0.1;
+      const playerRadius = BASE_SIZE / 2;
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
         const dist = Math.hypot(player.x - item.x, player.y - item.y);
         if (dist < (playerRadius + ITEM_RADIUS + haloMargin)) {
           player.itemEatenCount = (player.itemEatenCount || 0) + 1;
-          const expectedSegments = getExpectedSegments(player.itemEatenCount);
-          if (player.queue.length < expectedSegments) {
-            const newSegmentPos = getDelayedPosition(player.positionHistory, (player.queue.length + 1) * fixedDelay) || { x: player.x, y: player.y };
-            player.queue.push(newSegmentPos);
+          // Ajout d'un nouveau segment à la fin de la queue, initialisé à la position du dernier segment
+          if (player.queue.length === 0) {
+            // Si la queue est vide, le premier segment prend la position de la tête
+            player.queue.push({ x: player.x, y: player.y });
+          } else {
+            const lastSeg = player.queue[player.queue.length - 1];
+            player.queue.push({ x: lastSeg.x, y: lastSeg.y });
           }
-          player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
+          // Retirer l'item mangé
           room.items.splice(i, 1);
           i--;
-          // Respawn d'un nouvel item uniquement si room.items.length < MAX_ITEMS
+          // Respawn d'un nouvel item si nécessaire
           if (room.items.length < MAX_ITEMS) {
             const newItem = {
               id: `item-${Date.now()}`,
