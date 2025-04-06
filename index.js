@@ -255,7 +255,7 @@ setInterval(() => {
     });
     io.to(roomId).emit('update_players', room.players);
   });
-}, 50);
+}, 10);
 
 app.get('/', (req, res) => {
   res.send("Hello from the Snake.io-like server!");
