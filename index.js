@@ -22,7 +22,7 @@ const DELAY_MS = 50;       // Décalage par défaut (ms) pour la mise à jour de
 const SPEED_NORMAL = 2;
 const SPEED_BOOST = 4;
 
-// -- Fonction utilitaire pour "nettoyer" les joueurs avant envoi au client
+// --- Fonction utilitaire pour "nettoyer" les joueurs avant envoi au client
 function getPlayersForUpdate(players) {
   const result = {};
   for (const [id, player] of Object.entries(players)) {
@@ -40,7 +40,7 @@ function getPlayersForUpdate(players) {
   return result;
 }
 
-// Génère des items aléatoires pour une room
+// --- Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
   const items = [];
   for (let i = 0; i < count; i++) {
@@ -55,7 +55,7 @@ function generateRandomItems(count, worldSize) {
   return items;
 }
 
-// Retourne la position différée dans l'historique selon le délai (en ms)
+// --- Retourne la position différée dans l'historique selon le délai (en ms)
 function getDelayedPosition(positionHistory, delay) {
   const targetTime = Date.now() - delay;
   if (!positionHistory || positionHistory.length === 0) return null;
@@ -67,14 +67,13 @@ function getDelayedPosition(positionHistory, delay) {
   return { x: positionHistory[0].x, y: positionHistory[0].y };
 }
 
-// Retourne le nombre de segments attendus en fonction des items mangés
+// --- Retourne le nombre de segments attendus en fonction des items mangés
 function getExpectedSegments(itemEatenCount) {
   if (itemEatenCount < 5) return itemEatenCount;
   return 5 + Math.floor((itemEatenCount - 5) / 10);
 }
 
-// Rooms en mémoire
-// Chaque room stocke ses joueurs et ses items
+// --- Rooms en mémoire : chaque room stocke ses joueurs et ses items.
 const roomsData = {};
 
 async function findOrCreateRoom() {
@@ -127,7 +126,7 @@ io.on('connection', (socket) => {
       return;
     }
     const roomId = room.id;
-    console.log(Le joueur ${socket.id} rejoint la room ${roomId});
+    console.log(`Le joueur ${socket.id} rejoint la room ${roomId}`);
 
     if (!roomsData[roomId]) {
       roomsData[roomId] = {
@@ -136,7 +135,8 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Initialiser le joueur avec position aléatoire, queue et historique vides, direction aléatoire, couleur aléatoire, etc.
+    // Initialiser le joueur avec position aléatoire, queue et historique vides,
+    // direction aléatoire (normalisée), couleur aléatoire, etc.
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -158,18 +158,41 @@ io.on('connection', (socket) => {
 
     socket.join(roomId);
     socket.emit('joined_room', { roomId });
-    // Utiliser getPlayersForUpdate pour ne pas envoyer de champs problématiques
     io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
     io.to(roomId).emit('update_items', roomsData[roomId].items);
 
-    // Le client change seulement la direction via "changeDirection"
+    // --- Modification pour empêcher un demi-tour brutal (changement de direction trop radical)
     socket.on('changeDirection', (data) => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
       const { x, y } = data.direction;
       const mag = Math.sqrt(x * x + y * y) || 1;
-      player.direction = { x: x / mag, y: y / mag };
+      let newDir = { x: x / mag, y: y / mag };
+
+      // Limiter le changement de direction pour éviter un demi-tour brutal
+      const currentDir = player.direction;
+      // Calcul du produit scalaire pour obtenir l'angle entre les vecteurs
+      const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
+      const clampedDot = Math.min(Math.max(dot, -1), 1);
+      const angleDiff = Math.acos(clampedDot);
+      const maxAngle = Math.PI / 3; // 60° maximum
+
+      if (angleDiff > maxAngle) {
+        // Calculer le signe de la rotation (produit vectoriel)
+        const cross = currentDir.x * newDir.y - currentDir.y * newDir.x;
+        const sign = cross >= 0 ? 1 : -1;
+        // Fonction pour faire pivoter un vecteur d'un angle (radians)
+        function rotateVector(vec, angle) {
+          return {
+            x: vec.x * Math.cos(angle) - vec.y * Math.sin(angle),
+            y: vec.x * Math.sin(angle) + vec.y * Math.cos(angle)
+          };
+        }
+        newDir = rotateVector(currentDir, sign * maxAngle);
+      }
+      player.direction = newDir;
     });
+    // --- Fin modification changeDirection
 
     // Gestion du boost via "boostStart" et "boostStop"
     socket.on('boostStart', () => {
@@ -204,7 +227,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('player_eliminated', (data) => {
-      console.log(Player ${socket.id} éliminé par ${data.eliminatedBy});
+      console.log(`Player ${socket.id} éliminé par ${data.eliminatedBy}`);
       delete roomsData[roomId].players[socket.id];
       io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
     });
@@ -227,7 +250,7 @@ setInterval(() => {
     Object.entries(room.players).forEach(([id, player]) => {
       if (!player.direction) return;
 
-      // Sauvegarder la position actuelle dans l'historique
+      // Enregistrer la position actuelle dans l'historique
       player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
       if (player.positionHistory.length > 200) {
         player.positionHistory.shift();
@@ -238,10 +261,10 @@ setInterval(() => {
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
 
-      // Pour le calcul de l'espacement, on calcule un "fixedDelay"
-      // La distance désirée entre les centres doit être égale à la taille du joueur
+      // Calculer le "fixedDelay" pour l'espacement constant : 
+      // La distance désirée (taille du joueur) = speed * delay => delay = playerSize / speed.
       const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
-      const fixedDelay = (playerSize / speed) * 10; // ms
+      const fixedDelay = (playerSize / speed);
 
       // Mise à jour de la queue : pour chaque segment, récupérer la position différée
       for (let i = 0; i < player.queue.length; i++) {
@@ -250,7 +273,6 @@ setInterval(() => {
         if (delayedPos) {
           player.queue[i] = delayedPos;
         } else {
-          // Si pas trouvé, on cale la position sur la tête
           player.queue[i] = { x: player.x, y: player.y };
         }
       }
@@ -281,10 +303,8 @@ setInterval(() => {
           player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
           room.items.splice(i, 1);
           i--;
-
-          // Générez un nouvel item pour garder un total constant
           const newItem = {
-            id: item-${Date.now()},
+            id: `item-${Date.now()}`,
             x: Math.random() * worldSize.width,
             y: Math.random() * worldSize.height,
             value: Math.floor(Math.random() * 5) + 1,
@@ -296,8 +316,6 @@ setInterval(() => {
         }
       }
     });
-
-    // Envoyer l'état des joueurs « nettoyé » à tous
     io.to(roomId).emit('update_players', getPlayersForUpdate(room.players));
   });
 }, 10);
@@ -307,5 +325,5 @@ app.get('/', (req, res) => {
 });
 
 httpServer.listen(PORT, () => {
-  console.log(Serveur démarré sur le port ${PORT});
+  console.log(`Serveur démarré sur le port ${PORT}`);
 });
