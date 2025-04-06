@@ -210,7 +210,8 @@ io.on('connection', (socket) => {
           };
           // Ajouter l'item déposé dans les items (pour qu'il soit dessiné sur le terrain)
           roomsData[roomId].items.push(droppedItem);
-
+           // Émettre l'événement update_items pour que le client mette à jour les items
+          io.to(roomId).emit('update_items', roomsData[roomId].items);
           // Retirer le dernier segment de la queue
           player.queue.pop();
           player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
@@ -223,6 +224,8 @@ io.on('connection', (socket) => {
       }, 500);
       io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
     });
+
+    
 
     socket.on('boostStop', () => {
       const player = roomsData[roomId].players[socket.id];
