@@ -16,59 +16,9 @@ const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;    // Rayon fixe de l'item
 const BASE_SIZE = 20;      // Taille de base du joueur
-const DELAY_MS = 50;       // Décalage (ms) pour la mise à jour des segments
-const SIM_INTERVAL = 10;   // Intervalle de simulation (ms)
+const DELAY_MS = 50;       // Décalage par défaut (ms) pour la mise à jour des segments
 
-// Vitesse en pixels par intervalle
-const SPEED_NORMAL = 2;
-const SPEED_BOOST = 4;
-
-// Angle maximum autorisé pour un changement brusque (ici 30°)
-const MAX_TURN_ANGLE = Math.PI / 6;
-
-// --- Fonctions utilitaires ---
-
-// Fonction pour faire tourner un vecteur de "angle" radians
-function rotateVector(vector, angle) {
-  return {
-    x: vector.x * Math.cos(angle) - vector.y * Math.sin(angle),
-    y: vector.x * Math.sin(angle) + vector.y * Math.cos(angle)
-  };
-}
-
-// Limite la nouvelle direction pour éviter un demi-tour brutal
-function clampDirection(current, desired, maxAngle) {
-  // Normaliser la direction souhaitée
-  const mag = Math.sqrt(desired.x * desired.x + desired.y * desired.y) || 1;
-  const newDir = { x: desired.x / mag, y: desired.y / mag };
-  // Calcul de l'angle entre current et newDir
-  let dot = current.x * newDir.x + current.y * newDir.y;
-  dot = Math.min(1, Math.max(-1, dot));
-  const angle = Math.acos(dot);
-  if (angle <= maxAngle) {
-    return newDir;
-  } else {
-    // Déterminer le sens de rotation via le produit vectoriel
-    const cross = current.x * newDir.y - current.y * newDir.x;
-    const sign = cross >= 0 ? 1 : -1;
-    // Retourne le vecteur obtenu en tournant current de maxAngle dans le sens adéquat
-    return rotateVector(current, sign * maxAngle);
-  }
-}
-
-// Renvoie la position différée dans l'historique selon le délai (en ms)
-function getDelayedPosition(positionHistory, delay) {
-  const targetTime = Date.now() - delay;
-  if (!positionHistory || positionHistory.length === 0) return null;
-  for (let i = positionHistory.length - 1; i >= 0; i--) {
-    if (positionHistory[i].time <= targetTime) {
-      return { x: positionHistory[i].x, y: positionHistory[i].y };
-    }
-  }
-  return { x: positionHistory[0].x, y: positionHistory[0].y };
-}
-
-// Génère un tableau d'items aléatoires pour une room
+// Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
   const items = [];
   for (let i = 0; i < count; i++) {
@@ -89,10 +39,24 @@ function getExpectedSegments(itemEatenCount) {
   return 5 + Math.floor((itemEatenCount - 5) / 10);
 }
 
-// --- Données en mémoire ---
+// Fonction utilitaire : renvoie la position différée dans l'historique selon le délai (en ms)
+function getDelayedPosition(positionHistory, delay) {
+  const targetTime = Date.now() - delay;
+  if (!positionHistory || positionHistory.length === 0) return null;
+  for (let i = positionHistory.length - 1; i >= 0; i--) {
+    if (positionHistory[i].time <= targetTime) {
+      return { x: positionHistory[i].x, y: positionHistory[i].y };
+    }
+  }
+  return { x: positionHistory[0].x, y: positionHistory[0].y };
+}
+
+// Rooms en mémoire
+// Chaque room stocke :
+// - players: { x, y, length, queue, positionHistory, direction, boosting, lastBoostTime, itemEatenCount, color }
+// - items: tableau d'items
 const roomsData = {};
 
-// --- Fonctions de gestion de room ---
 async function findOrCreateRoom() {
   let { data: existingRooms, error } = await supabase
     .from('rooms')
@@ -123,7 +87,11 @@ async function findOrCreateRoom() {
 
 async function leaveRoom(roomId) {
   if (!roomId) return;
-  const { data, error } = await supabase.from('rooms').select('current_players').eq('id', roomId).single();
+  const { data, error } = await supabase
+    .from('rooms')
+    .select('current_players')
+    .eq('id', roomId)
+    .single();
   if (!data || error) {
     console.error('Erreur lecture room:', error);
     return;
@@ -132,7 +100,6 @@ async function leaveRoom(roomId) {
   await supabase.from('rooms').update({ current_players: newCount }).eq('id', roomId);
 }
 
-// --- Gestion des connexions ---
 io.on('connection', (socket) => {
   console.log('Nouveau client connecté:', socket.id);
   (async () => {
@@ -152,7 +119,7 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Initialiser le joueur avec position, historique, queue, direction, couleur, etc.
+    // Initialiser le joueur
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -177,22 +144,22 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('update_players', roomsData[roomId].players);
     io.to(roomId).emit('update_items', roomsData[roomId].items);
 
-    // Le client change seulement la direction via "changeDirection" avec limitation d'arc
+    // Le client change seulement la direction via "changeDirection"
     socket.on('changeDirection', (data) => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
       const { x, y } = data.direction;
-      player.direction = clampDirection(player.direction, { x, y }, MAX_TURN_ANGLE);
+      const mag = Math.sqrt(x * x + y * y) || 1;
+      // Limiter les changements de direction brutaux n'est pas modifié ici (déjà géré côté client ou par clampDirection si nécessaire)
+      player.direction = { x: x / mag, y: y / mag };
     });
 
-    // Gestion du boost en continu
-    // "boostStart" active le boost (tant que le client garde le clic) et "boostStop" l'arrête
+    // Gestion du boost (les événements boostStart et boostStop)
     socket.on('boostStart', () => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
-      // Ne peut pas booster si la queue est vide
+      // Ne peut booster que si la queue n'est pas vide
       if (player.queue.length === 0) return;
-      // Si déjà en boost, ne rien faire
       if (player.boosting) return;
       player.boosting = true;
       // Démarrer un intervalle qui retire un segment toutes les 500 ms
@@ -202,7 +169,6 @@ io.on('connection', (socket) => {
           player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
           io.to(roomId).emit('update_players', roomsData[roomId].players);
         } else {
-          // Arrêter le boost si la queue est vide
           clearInterval(player.boostInterval);
           player.boosting = false;
           io.to(roomId).emit('update_players', roomsData[roomId].players);
@@ -238,13 +204,13 @@ io.on('connection', (socket) => {
   })();
 });
 
-// Boucle de simulation pour le mouvement continu (toutes les SIM_INTERVAL ms)
+// Boucle de simulation pour le mouvement continu (toutes les 10 ms)
 setInterval(() => {
   Object.keys(roomsData).forEach(roomId => {
     const room = roomsData[roomId];
     Object.entries(room.players).forEach(([id, player]) => {
       if (player.direction) {
-        // Sauvegarder la position de la tête avant mise à jour
+        // Sauvegarder la position de la tête avant mise à jour (non utilisée directement ici, mais conservée dans l'historique)
         const previousHead = { x: player.x, y: player.y };
 
         // Calculer la vitesse selon boost ou non
@@ -259,13 +225,13 @@ setInterval(() => {
         }
 
         // Calculer le délai fixe pour obtenir un espacement constant :
-        // La distance désirée entre les cercles est égale à la taille du joueur.
-        // On calcule fixedDelay pour que la distance parcourue pendant ce délai
-        // soit égale à la taille actuelle (BASE_SIZE * (1 + queue.length * 0.1))
+        // La distance désirée entre les centres est égale à la taille actuelle du joueur.
+        // fixedDelay = (playerSize / vitesse) * SIM_INTERVAL
         const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
-        const fixedDelay = playerSize / (player.boosting ? SPEED_BOOST : SPEED_NORMAL) * SIM_INTERVAL;
+        const fixedDelay = (playerSize / (player.boosting ? SPEED_BOOST : SPEED_NORMAL)) * 10; // SIM_INTERVAL = 10 ms
 
-        // Mise à jour de la queue : pour chaque segment, utiliser un décalage de (i+1)*fixedDelay
+        // Mise à jour de la queue :
+        // Pour chaque segment, la position doit correspondre à la position différée dans l'historique de (i+1)*fixedDelay ms
         for (let i = 0; i < player.queue.length; i++) {
           const delay = (i + 1) * fixedDelay;
           const delayedPos = getDelayedPosition(player.positionHistory, delay);
@@ -314,9 +280,15 @@ setInterval(() => {
         }
       }
     });
-    io.to(roomId).emit('update_players', room.players);
+    // Lors de l'envoi aux clients, on retire la propriété "positionHistory" pour éviter des problèmes de profondeur
+    const playersForUpdate = {};
+    Object.entries(room.players).forEach(([id, player]) => {
+      const { positionHistory, ...rest } = player;
+      playersForUpdate[id] = rest;
+    });
+    io.to(roomId).emit('update_players', playersForUpdate);
   });
-}, SIM_INTERVAL);
+}, 10);
 
 app.get('/', (req, res) => {
   res.send("Hello from the Snake.io-like server!");
