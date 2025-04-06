@@ -16,7 +16,7 @@ const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;    // Rayon fixe de l'item
 const BASE_SIZE = 20;      // Taille de base du joueur
-const DELAY_MS = 50;      // Décalage par défaut (ms) pour la mise à jour des segments
+const DEFAULT_DELAY_MS = 200;  // Délai par défaut pour la mise à jour des segments (en ms)
 
 // Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
@@ -115,8 +115,7 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Initialiser le joueur avec une position aléatoire, une queue vide, un historique vide,
-    // une direction aléatoire (normalisée), une couleur aléatoire et un compteur d'items mangés à 0.
+    // Initialiser le joueur avec position aléatoire, queue et historique vides, direction aléatoire, couleur aléatoire et compteur d'items à 0
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -198,11 +197,18 @@ setInterval(() => {
           player.positionHistory.shift();
         }
 
-        // Calcul du délai courant pour la mise à jour de la queue : pendant le boost, le délai est divisé par 2
-        const currentDelay = player.boosting ? DELAY_MS / 2 : DELAY_MS;
+        // Calculer la "taille" actuelle du joueur (diamètre du cercle)
+        const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
+        // Calculer le délai nécessaire pour que le joueur parcoure une distance égale à sa taille
+        // La distance par intervalle est "speed" (pixels tous les 10ms), donc le délai T en ms est:
+        // T = (playerSize / speed) * 10
+        const T = (playerSize / speed) * 10;
+        // Si le joueur booste, on divise T par 2 pour mettre à jour deux fois plus vite
+        const currentDelay = player.boosting ? T / 2 : T;
 
-        // Mise à jour de la queue :
-        // Pour chaque segment existant, on met à jour sa position selon le délai (i+1) * currentDelay
+        // Mise à jour de la queue
+        // Pour chaque segment existant, on veut que la distance entre son centre et le centre du segment précédent soit égale à playerSize
+        // Ainsi, pour le i-ème segment, on cherche dans l'historique la position datant de (i+1) * currentDelay ms
         for (let i = 0; i < player.queue.length; i++) {
           const delay = (i + 1) * currentDelay;
           const delayedPos = getDelayedPosition(player.positionHistory, delay);
@@ -213,7 +219,7 @@ setInterval(() => {
           }
         }
 
-        // Vérifier les collisions avec les parois
+        // Vérifier collisions avec les parois
         if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
           io.to(roomId).emit("player_eliminated", { eliminatedBy: "boundary" });
           delete room.players[id];
@@ -221,13 +227,12 @@ setInterval(() => {
         }
 
         // Vérifier collision avec les items (hitbox circulaire)
-        const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.1));
         const playerRadius = playerSize / 2;
         for (let i = 0; i < room.items.length; i++) {
           const item = room.items[i];
           const dist = Math.hypot(player.x - item.x, player.y - item.y);
           if (dist < (playerRadius + ITEM_RADIUS)) {
-            // Collision : le joueur mange l'item
+            // Le joueur mange l'item
             player.itemEatenCount = (player.itemEatenCount || 0) + 1;
             // Calcul du nombre de segments attendus
             const expectedSegments = getExpectedSegments(player.itemEatenCount);
