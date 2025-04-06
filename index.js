@@ -18,6 +18,10 @@ const ITEM_RADIUS = 10;    // Rayon fixe de l'item
 const BASE_SIZE = 20;      // Taille de base du joueur
 const DELAY_MS = 50;       // Décalage par défaut (ms) pour la mise à jour des segments
 
+// Ajout des constantes de vitesse
+const SPEED_NORMAL = 2;
+const SPEED_BOOST = 4;
+
 // Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
   const items = [];
@@ -119,7 +123,7 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Initialiser le joueur
+    // Initialiser le joueur avec une position aléatoire, queue et historique vides, direction aléatoire, couleur aléatoire, etc.
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -150,19 +154,16 @@ io.on('connection', (socket) => {
       if (!player) return;
       const { x, y } = data.direction;
       const mag = Math.sqrt(x * x + y * y) || 1;
-      // Limiter les changements de direction brutaux n'est pas modifié ici (déjà géré côté client ou par clampDirection si nécessaire)
       player.direction = { x: x / mag, y: y / mag };
     });
 
-    // Gestion du boost (les événements boostStart et boostStop)
+    // Gestion du boost via boostStart/boostStop
     socket.on('boostStart', () => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
-      // Ne peut booster que si la queue n'est pas vide
       if (player.queue.length === 0) return;
       if (player.boosting) return;
       player.boosting = true;
-      // Démarrer un intervalle qui retire un segment toutes les 500 ms
       player.boostInterval = setInterval(() => {
         if (player.queue.length > 0) {
           player.queue.pop();
@@ -210,28 +211,24 @@ setInterval(() => {
     const room = roomsData[roomId];
     Object.entries(room.players).forEach(([id, player]) => {
       if (player.direction) {
-        // Sauvegarder la position de la tête avant mise à jour (non utilisée directement ici, mais conservée dans l'historique)
-        const previousHead = { x: player.x, y: player.y };
-
-        // Calculer la vitesse selon boost ou non
-        const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-        player.x += player.direction.x * speed;
-        player.y += player.direction.y * speed;
-
-        // Ajouter la nouvelle position à l'historique (limité à 200 positions)
+        // Sauvegarder la position courante dans l'historique
         player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
         if (player.positionHistory.length > 200) {
           player.positionHistory.shift();
         }
 
-        // Calculer le délai fixe pour obtenir un espacement constant :
-        // La distance désirée entre les centres est égale à la taille actuelle du joueur.
-        // fixedDelay = (playerSize / vitesse) * SIM_INTERVAL
-        const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
-        const fixedDelay = (playerSize / (player.boosting ? SPEED_BOOST : SPEED_NORMAL)) * 10; // SIM_INTERVAL = 10 ms
+        // Calculer la vitesse
+        const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
+        player.x += player.direction.x * speed;
+        player.y += player.direction.y * speed;
 
-        // Mise à jour de la queue :
-        // Pour chaque segment, la position doit correspondre à la position différée dans l'historique de (i+1)*fixedDelay ms
+        // Calculer un délai fixe pour espacer les segments
+        // La distance désirée entre les centres = taille du joueur (BASE_SIZE * (1 + queue.length * 0.1))
+        const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
+        // fixedDelay = (taille / vitesse) * SIM_INTERVAL (où SIM_INTERVAL = 10 ms)
+        const fixedDelay = (playerSize / (player.boosting ? SPEED_BOOST : SPEED_NORMAL)) * 10;
+
+        // Mettre à jour la queue : pour chaque segment, récupérer la position différée
         for (let i = 0; i < player.queue.length; i++) {
           const delay = (i + 1) * fixedDelay;
           const delayedPos = getDelayedPosition(player.positionHistory, delay);
@@ -280,7 +277,7 @@ setInterval(() => {
         }
       }
     });
-    // Lors de l'envoi aux clients, on retire la propriété "positionHistory" pour éviter des problèmes de profondeur
+    // Avant d'envoyer aux clients, on supprime positionHistory pour éviter une profondeur excessive
     const playersForUpdate = {};
     Object.entries(room.players).forEach(([id, player]) => {
       const { positionHistory, ...rest } = player;
