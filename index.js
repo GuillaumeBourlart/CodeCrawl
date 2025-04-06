@@ -16,25 +16,22 @@ const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;    // Rayon fixe de l'item
 const BASE_SIZE = 20;      // Taille de base du joueur
+const SIM_INTERVAL = 10;   // Intervalle de simulation en ms
+const DELAY_MS = 50;       // Décalage de base pour la queue (pour espacer les segments)
 
-// Intervalle de simulation (en ms)
-const SIM_INTERVAL = 10;
+const SPEED_NORMAL = 2;    // Vitesse en mode normal (en pixels par intervalle)
+const SPEED_BOOST = 4;     // Vitesse en boost
 
-// Vitesse (en pixels par intervalle de simulation)
-const SPEED_NORMAL = 2;
-const SPEED_BOOST = 4;
-
-// La distance souhaitée entre les centres des segments est égale à la taille du segment.
-// Pour un joueur de taille S, si sa vitesse normale est SPEED_NORMAL, alors le délai nécessaire (en ms)
-// pour parcourir une distance S est : delay = (S / SPEED_NORMAL) * SIM_INTERVAL.
-// De même, en boost, le délai sera : (S / SPEED_BOOST) * SIM_INTERVAL.
-
-function getCurrentDelay(player) {
-  // La taille du joueur dépend du nombre de segments (queue)
-  const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.1));
-  return player.boosting 
-    ? (playerSize / SPEED_BOOST) * SIM_INTERVAL 
-    : (playerSize / SPEED_NORMAL) * SIM_INTERVAL;
+// Fonction utilitaire qui renvoie la position différée dans l'historique selon un délai (en ms)
+function getDelayedPosition(positionHistory, delay) {
+  const targetTime = Date.now() - delay;
+  if (!positionHistory || positionHistory.length === 0) return null;
+  for (let i = positionHistory.length - 1; i >= 0; i--) {
+    if (positionHistory[i].time <= targetTime) {
+      return { x: positionHistory[i].x, y: positionHistory[i].y };
+    }
+  }
+  return { x: positionHistory[0].x, y: positionHistory[0].y };
 }
 
 // Génère des items aléatoires pour une room
@@ -52,19 +49,7 @@ function generateRandomItems(count, worldSize) {
   return items;
 }
 
-// Retourne la position différée dans l'historique en fonction d'un délai (en ms)
-function getDelayedPosition(positionHistory, delay) {
-  const targetTime = Date.now() - delay;
-  if (!positionHistory || positionHistory.length === 0) return null;
-  for (let i = positionHistory.length - 1; i >= 0; i--) {
-    if (positionHistory[i].time <= targetTime) {
-      return { x: positionHistory[i].x, y: positionHistory[i].y };
-    }
-  }
-  return { x: positionHistory[0].x, y: positionHistory[0].y };
-}
-
-// Retourne le nombre de segments attendus en fonction du nombre d'items mangés
+// Retourne le nombre de segments attendus selon le nombre d'items mangés
 function getExpectedSegments(itemEatenCount) {
   if (itemEatenCount < 5) return itemEatenCount;
   return 5 + Math.floor((itemEatenCount - 5) / 10);
@@ -131,7 +116,11 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Initialiser le joueur
+    // Initialiser le joueur :
+    // - Position aléatoire, queue et historique vides
+    // - Direction aléatoire normalisée
+    // - Couleur aléatoire
+    // - Compteur d'items mangés à 0
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -161,11 +150,24 @@ io.on('connection', (socket) => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
       const { x, y } = data.direction;
-      const mag = Math.sqrt(x * x + y * y) || 1;
-      player.direction = { x: x / mag, y: y / mag };
+      const newDir = { x, y };
+      // Vérifier qu'on ne fait pas un demi-tour brutal
+      const dot = player.direction.x * newDir.x + player.direction.y * newDir.y;
+      if (dot < 0) {
+        // Si le produit scalaire est négatif, on ignore la demande pour éviter un retournement instantané
+        return;
+      }
+      // Interpoler progressivement la direction pour limiter l'angle de changement
+      const lerpFactor = 0.2;
+      const updatedDir = {
+        x: player.direction.x + lerpFactor * (newDir.x - player.direction.x),
+        y: player.direction.y + lerpFactor * (newDir.y - player.direction.y)
+      };
+      const newMag = Math.sqrt(updatedDir.x * updatedDir.x + updatedDir.y * updatedDir.y) || 1;
+      player.direction = { x: updatedDir.x / newMag, y: updatedDir.y / newMag };
     });
 
-    // Gestion du boost avec cooldown de 7 sec
+    // Gestion du boost avec cooldown de 7 sec et consommation de segments
     socket.on('boost', () => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
@@ -174,7 +176,20 @@ io.on('connection', (socket) => {
       player.lastBoostTime = now;
       player.boosting = true;
       io.to(roomId).emit('update_players', roomsData[roomId].players);
+
+      // Démarrer un intervalle qui, toutes les 500 ms, supprime le dernier segment de la queue (s'il existe)
+      const boostInterval = setInterval(() => {
+        if (player.queue.length > 0) {
+          player.queue.pop();
+          // Mettre à jour la taille du joueur
+          player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
+          io.to(roomId).emit('update_players', roomsData[roomId].players);
+        }
+      }, 500);
+
+      // Après 3000 ms, arrêter le boost et l'intervalle
       setTimeout(() => {
+        clearInterval(boostInterval);
         player.boosting = false;
         io.to(roomId).emit('update_players', roomsData[roomId].players);
       }, 3000);
@@ -197,7 +212,7 @@ io.on('connection', (socket) => {
   })();
 });
 
-// Boucle de simulation pour le mouvement continu (toutes les 10 ms)
+// Boucle de simulation pour le mouvement continu (toutes les SIM_INTERVAL ms)
 setInterval(() => {
   Object.keys(roomsData).forEach(roomId => {
     const room = roomsData[roomId];
@@ -206,26 +221,24 @@ setInterval(() => {
         // Sauvegarder la position de la tête avant mise à jour
         const previousHead = { x: player.x, y: player.y };
 
-        // Calcul de la vitesse (selon boost ou normal)
+        // Calculer la vitesse (selon boost ou normal)
         const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
         player.x += player.direction.x * speed;
         player.y += player.direction.y * speed;
 
-        // Ajouter la nouvelle position à l'historique (limité à 200 positions)
+        // Ajouter la nouvelle position à l'historique
         player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
         if (player.positionHistory.length > 200) {
           player.positionHistory.shift();
         }
 
-        // Calculer la taille actuelle du joueur (basée sur le nombre de segments)
+        // On veut que la distance entre les centres des segments soit toujours égale à la taille du segment.
+        // Pour cela, on calcule un délai fixe qui correspond au temps nécessaire pour parcourir une distance égale à BASE_SIZE (ajusté par le nombre de segments).
         const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.1));
-        // Calculer le délai fixe pour obtenir un espacement constant (distance = playerSize)
-        const fixedDelay = player.boosting 
-          ? (playerSize / SPEED_BOOST) * SIM_INTERVAL 
-          : (playerSize / SPEED_NORMAL) * SIM_INTERVAL;
+        // Le délai fixe est basé sur la vitesse normale (pour garder un espacement constant)
+        const fixedDelay = (playerSize / SPEED_NORMAL) * SIM_INTERVAL;
 
-        // Mise à jour de la queue :
-        // Pour chaque segment, utiliser un décalage de (i+1) * fixedDelay pour obtenir la position correspondante
+        // Mise à jour de la queue : chaque segment prend la position différée correspondant à (i+1)*fixedDelay.
         for (let i = 0; i < player.queue.length; i++) {
           const delay = (i + 1) * fixedDelay;
           const delayedPos = getDelayedPosition(player.positionHistory, delay);
@@ -236,7 +249,7 @@ setInterval(() => {
           }
         }
 
-        // Vérifier collisions avec les parois
+        // Vérifier collision avec les parois
         if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
           io.to(roomId).emit("player_eliminated", { eliminatedBy: "boundary" });
           delete room.players[id];
@@ -261,7 +274,7 @@ setInterval(() => {
             }
             // Mettre à jour la taille
             player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
-            // Retirer l'item et en générer un nouveau
+            // Supprimer l'item et en générer un nouveau
             room.items.splice(i, 1);
             i--;
             const newItem = {
