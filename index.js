@@ -245,7 +245,7 @@ io.on('connection', (socket) => {
       }
     });
 
-    // Player eliminated event
+    // Player eliminated event (pour événements déclenchés côté client)
     socket.on('player_eliminated', (data) => {
       console.log(`Player ${socket.id} éliminé par ${data.eliminatedBy}`);
       delete roomsData[roomId].players[socket.id];
@@ -265,10 +265,11 @@ io.on('connection', (socket) => {
   })();
 });
 
-// Boucle de simulation pour le mouvement continu (toutes les 10 ms)
+// Boucle de simulation (toutes les 10 ms)
 setInterval(() => {
   Object.keys(roomsData).forEach(roomId => {
     const room = roomsData[roomId];
+
     // Détection de collision frontale entre joueurs
     const playerIds = Object.keys(room.players);
     for (let i = 0; i < playerIds.length; i++) {
@@ -284,12 +285,13 @@ setInterval(() => {
         const size1 = BASE_SIZE * (1 + (player1.queue.length * 0.1));
         const size2 = BASE_SIZE * (1 + (player2.queue.length * 0.1));
         if (distance < (size1 + size2) / 2) {
-          // Calculer le produit scalaire pour vérifier si ils se font face
+          // Vérifier s'ils se font face (collision frontale)
           const dot = player1.direction.x * player2.direction.x + player1.direction.y * player2.direction.y;
           if (dot < -0.8) {
             console.log(`Collision frontale détectée entre ${id1} et ${id2}. Élimination mutuelle.`);
-            // Émettre l'événement d'élimination pour chacun
-            io.to(roomId).emit("player_eliminated", { eliminatedBy: "collision frontale" });
+            // Émettre l'événement d'élimination uniquement aux joueurs concernés
+            io.to(id1).emit("player_eliminated", { eliminatedBy: "collision frontale" });
+            io.to(id2).emit("player_eliminated", { eliminatedBy: "collision frontale" });
             delete room.players[id1];
             delete room.players[id2];
           }
@@ -299,16 +301,19 @@ setInterval(() => {
 
     Object.entries(room.players).forEach(([id, player]) => {
       if (!player.direction) return;
-      // Sauvegarder la position actuelle dans l'historique
+
+      // Mise à jour de l'historique de position
       player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
       if (player.positionHistory.length > 10000) {
         player.positionHistory.shift();
       }
-      // Calculer la vitesse (boost ou normal)
+
+      // Calcul de la nouvelle position
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
-      // Calculer l'espacement pour la queue
+
+      // Mise à jour de la queue
       const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
       const fixedDelay = (playerSize / speed) * 10; // ms
       for (let i = 0; i < player.queue.length; i++) {
@@ -320,14 +325,17 @@ setInterval(() => {
           player.queue[i] = { x: player.x, y: player.y };
         }
       }
-      // Vérifier collision avec les parois
+
+      // Collision avec les parois
       if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
         console.log(`Le joueur ${id} a touché une paroi. Élimination.`);
-        io.to(roomId).emit("player_eliminated", { eliminatedBy: "boundary" });
+        // Envoyer l'événement uniquement au joueur concerné
+        io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
         delete room.players[id];
         return;
       }
-      // Vérifier collision avec les items
+
+      // Collision avec les items
       const haloMargin = playerSize * 0.1;
       const playerRadius = playerSize / 2;
       for (let i = 0; i < room.items.length; i++) {
@@ -337,10 +345,7 @@ setInterval(() => {
           player.itemEatenCount = (player.itemEatenCount || 0) + 1;
           const expectedSegments = getExpectedSegments(player.itemEatenCount);
           if (player.queue.length < expectedSegments) {
-            const newSegmentPos = getDelayedPosition(
-              player.positionHistory,
-              (player.queue.length + 1) * fixedDelay
-            ) || { x: player.x, y: player.y };
+            const newSegmentPos = getDelayedPosition(player.positionHistory, (player.queue.length + 1) * fixedDelay) || { x: player.x, y: player.y };
             player.queue.push(newSegmentPos);
           }
           player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
