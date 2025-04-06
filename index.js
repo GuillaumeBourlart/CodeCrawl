@@ -40,7 +40,7 @@ function generateRandomItems(count, worldSize) {
 
 // Rooms en mémoire
 // Pour chaque room, on stocke :
-// - players: chaque joueur possède {x,y, length, queue, positionHistory}
+// - players: chaque joueur possède {x, y, length, queue, positionHistory, direction, boosting, lastBoostTime}
 // - items: tableau d'items
 const roomsData = {};
 
@@ -96,18 +96,14 @@ async function leaveRoom(roomId) {
 }
 
 // Fonction utilitaire pour récupérer la position d'un joueur avec un délai donné (en ms)
-// On parcourt la positionHistory pour trouver la position la plus proche du timestamp requis.
 function getDelayedPosition(positionHistory, delay) {
   const targetTime = Date.now() - delay;
-  // Si aucune historique, renvoie null
   if (!positionHistory || positionHistory.length === 0) return null;
-  // On parcourt la liste depuis la fin (positions les plus récentes)
   for (let i = positionHistory.length - 1; i >= 0; i--) {
     if (positionHistory[i].time <= targetTime) {
       return { x: positionHistory[i].x, y: positionHistory[i].y };
     }
   }
-  // Si aucune position n'est suffisamment ancienne, renvoie la plus ancienne
   return { x: positionHistory[0].x, y: positionHistory[0].y };
 }
 
@@ -123,7 +119,6 @@ io.on('connection', (socket) => {
     const roomId = room.id;
     console.log(`Le joueur ${socket.id} rejoint la room ${roomId}`);
 
-    // Initialise la room si nécessaire
     if (!roomsData[roomId]) {
       roomsData[roomId] = {
         players: {},
@@ -131,13 +126,22 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Initialiser le joueur avec une queue vide et un historique de positions vide
+    // Initialiser le joueur :
+    // - Position aléatoire
+    // - Queue vide, historique vide
+    // - Direction par défaut aléatoire (normalisée)
+    const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
+    const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
+    defaultDirection.x /= mag;
+    defaultDirection.y /= mag;
     roomsData[roomId].players[socket.id] = {
       x: Math.random() * 800,
       y: Math.random() * 600,
       length: BASE_SIZE,
-      queue: [],           // Queue initialement vide
-      positionHistory: []  // Historique des positions (objets {x, y, time})
+      queue: [],
+      positionHistory: [],
+      direction: defaultDirection,
+      boosting: false
     };
 
     socket.join(roomId);
@@ -145,76 +149,22 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('update_players', roomsData[roomId].players);
     io.to(roomId).emit('update_items', roomsData[roomId].items);
 
-    // Gestion du mouvement
-    socket.on('move', (data) => {
+    // Le client change seulement la direction avec "changeDirection"
+    socket.on('changeDirection', (data) => {
       let player = roomsData[roomId].players[socket.id];
       if (!player) return;
-      
-      // Ajoute la position actuelle à l'historique avec timestamp
-      player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
-      // Pour éviter que l'historique ne devienne trop grand, on garde seulement les 100 dernières positions
-      if (player.positionHistory.length > 100) {
-        player.positionHistory.shift();
-      }
-      
-      // Sauvegarder l'ancienne position (pour le calcul de la queue)
-      const oldHead = { x: player.x, y: player.y };
-
-      // Mettre à jour la tête
-      player.x = data.x;
-      player.y = data.y;
-
-      // Mettre à jour la queue pour chaque élément avec un délai
-      // Pour le i-ème élément, on souhaite une position d'il y a (i+1)*DELAY_MS ms
-      if (player.queue) {
-        for (let i = 0; i < player.queue.length; i++) {
-          const delay = (i + 1) * DELAY_MS;
-          const delayedPos = getDelayedPosition(player.positionHistory, delay);
-          if (delayedPos) {
-            player.queue[i] = delayedPos;
-          }
-        }
-      }
-      
-      // Vérifier la collision avec chaque item (collision sur toute la hitbox)
-      // On considère le joueur comme un cercle de rayon = (playerSize / 2)
-      const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.1));
-      const playerRadius = playerSize / 2;
-      for (let i = 0; i < roomsData[roomId].items.length; i++) {
-        const item = roomsData[roomId].items[i];
-        // Supposons que l'item a un rayon fixe
-        const itemRadius = 10;
-        const dist = Math.hypot(player.x - item.x, player.y - item.y);
-        if (dist < (playerRadius + itemRadius)) {
-          // Collision : le joueur mange l'item
-          // On ajoute un nouvel élément dans la queue : on prend la position dans l'historique correspondant à DELAY_MS ms
-          const newSegmentPos = getDelayedPosition(player.positionHistory, DELAY_MS) || { x: player.x, y: player.y };
-          player.queue.push(newSegmentPos);
-          // Met à jour la taille
-          player.length = BASE_SIZE * (1 + player.queue.length * 0.01);
-          // Retirer l'item
-          roomsData[roomId].items.splice(i, 1);
-          i--;
-          // Créer un nouvel item aléatoire
-          const newItem = {
-            id: `item-${Date.now()}`,
-            x: Math.random() * worldSize.width,
-            y: Math.random() * worldSize.height,
-            value: Math.floor(Math.random() * 5) + 1,
-            color: itemColors[Math.floor(Math.random() * itemColors.length)]
-          };
-          roomsData[roomId].items.push(newItem);
-          io.to(roomId).emit('update_items', roomsData[roomId].items);
-          break;
-        }
-      }
-      io.to(roomId).emit('update_players', roomsData[roomId].players);
+      const { x, y } = data.direction;
+      const mag = Math.sqrt(x * x + y * y) || 1;
+      player.direction = { x: x / mag, y: y / mag };
     });
 
-    // Gestion du boost : active pendant 3 secondes
+    // Gestion du boost avec cooldown de 7 sec
     socket.on('boost', () => {
       let player = roomsData[roomId].players[socket.id];
       if (!player) return;
+      const now = Date.now();
+      if (player.lastBoostTime && now < player.lastBoostTime + 7000) return;
+      player.lastBoostTime = now;
       player.boosting = true;
       io.to(roomId).emit('update_players', roomsData[roomId].players);
       setTimeout(() => {
@@ -223,7 +173,6 @@ io.on('connection', (socket) => {
       }, 3000);
     });
 
-    // Gestion d'une éventuelle élimination
     socket.on('player_eliminated', (data) => {
       console.log(`Player ${socket.id} éliminé par ${data.eliminatedBy}`);
       delete roomsData[roomId].players[socket.id];
@@ -240,6 +189,73 @@ io.on('connection', (socket) => {
     });
   })();
 });
+
+// Boucle de simulation : mise à jour continue du mouvement toutes les 50 ms
+setInterval(() => {
+  Object.keys(roomsData).forEach(roomId => {
+    const room = roomsData[roomId];
+    Object.entries(room.players).forEach(([id, player]) => {
+      if (player.direction) {
+        // Utiliser la vitesse appropriée
+        const speed = player.boosting ? 10 : 5;
+        player.x += player.direction.x * speed;
+        player.y += player.direction.y * speed;
+
+        // Enregistrer la nouvelle position dans l'historique
+        player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
+        if (player.positionHistory.length > 100) {
+          player.positionHistory.shift();
+        }
+
+        // Mise à jour de la queue : pour le i-ème élément, on souhaite la position différée de (i+1)*DELAY_MS ms
+        if (player.queue && player.queue.length > 0) {
+          for (let i = 0; i < player.queue.length; i++) {
+            const delay = (i + 1) * DELAY_MS;
+            const delayedPos = getDelayedPosition(player.positionHistory, delay);
+            if (delayedPos) {
+              player.queue[i] = delayedPos;
+            }
+          }
+        }
+
+        // Vérifier collision avec les parois
+        if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
+          io.to(roomId).emit("player_eliminated", { eliminatedBy: "boundary" });
+          delete room.players[id];
+          return;
+        }
+
+        // Vérifier collision avec les items (basée sur la hitbox circulaire)
+        const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.1));
+        const playerRadius = playerSize / 2;
+        for (let i = 0; i < room.items.length; i++) {
+          const item = room.items[i];
+          const dist = Math.hypot(player.x - item.x, player.y - item.y);
+          if (dist < (playerRadius + ITEM_RADIUS)) {
+            // Collision : le joueur mange l'item
+            const newSegmentPos = getDelayedPosition(player.positionHistory, DELAY_MS) || { x: player.x, y: player.y };
+            player.queue.push(newSegmentPos);
+            // Met à jour la taille (optionnel, ici la formule est modifiable)
+            player.length = BASE_SIZE * (1 + player.queue.length * 0.01);
+            room.items.splice(i, 1);
+            i--;
+            const newItem = {
+              id: `item-${Date.now()}`,
+              x: Math.random() * worldSize.width,
+              y: Math.random() * worldSize.height,
+              value: Math.floor(Math.random() * 5) + 1,
+              color: itemColors[Math.floor(Math.random() * itemColors.length)]
+            };
+            room.items.push(newItem);
+            io.to(roomId).emit('update_items', room.items);
+            break;
+          }
+        }
+      }
+    });
+    io.to(roomId).emit('update_players', room.players);
+  });
+}, 50);
 
 app.get('/', (req, res) => {
   res.send("Hello from the Snake.io-like server!");
