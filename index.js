@@ -18,7 +18,7 @@ const ITEM_RADIUS = 10;    // Rayon fixe de l'item
 const BASE_SIZE = 20;      // Taille de base du joueur
 const DELAY_MS = 50;       // Décalage par défaut (ms) pour la mise à jour des segments
 
-// Ajout des constantes de vitesse
+// Vitesse (normal et boost)
 const SPEED_NORMAL = 2;
 const SPEED_BOOST = 4;
 
@@ -37,13 +37,7 @@ function generateRandomItems(count, worldSize) {
   return items;
 }
 
-// Retourne le nombre de segments attendus en fonction du nombre d'items mangés
-function getExpectedSegments(itemEatenCount) {
-  if (itemEatenCount < 5) return itemEatenCount;
-  return 5 + Math.floor((itemEatenCount - 5) / 10);
-}
-
-// Fonction utilitaire : renvoie la position différée dans l'historique selon le délai (en ms)
+// Retourne la position différée dans l'historique selon le délai (en ms)
 function getDelayedPosition(positionHistory, delay) {
   const targetTime = Date.now() - delay;
   if (!positionHistory || positionHistory.length === 0) return null;
@@ -55,10 +49,14 @@ function getDelayedPosition(positionHistory, delay) {
   return { x: positionHistory[0].x, y: positionHistory[0].y };
 }
 
+// Retourne le nombre de segments attendus en fonction des items mangés
+function getExpectedSegments(itemEatenCount) {
+  if (itemEatenCount < 5) return itemEatenCount;
+  return 5 + Math.floor((itemEatenCount - 5) / 10);
+}
+
 // Rooms en mémoire
-// Chaque room stocke :
-// - players: { x, y, length, queue, positionHistory, direction, boosting, lastBoostTime, itemEatenCount, color }
-// - items: tableau d'items
+// Chaque room stocke ses joueurs et ses items
 const roomsData = {};
 
 async function findOrCreateRoom() {
@@ -91,11 +89,7 @@ async function findOrCreateRoom() {
 
 async function leaveRoom(roomId) {
   if (!roomId) return;
-  const { data, error } = await supabase
-    .from('rooms')
-    .select('current_players')
-    .eq('id', roomId)
-    .single();
+  const { data, error } = await supabase.from('rooms').select('current_players').eq('id', roomId).single();
   if (!data || error) {
     console.error('Erreur lecture room:', error);
     return;
@@ -123,7 +117,7 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Initialiser le joueur avec une position aléatoire, queue et historique vides, direction aléatoire, couleur aléatoire, etc.
+    // Initialiser le joueur avec position aléatoire, queue et historique vides, direction aléatoire, couleur aléatoire, etc.
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -157,15 +151,16 @@ io.on('connection', (socket) => {
       player.direction = { x: x / mag, y: y / mag };
     });
 
-    // Gestion du boost via boostStart/boostStop
+    // Gestion du boost via "boostStart" et "boostStop"
     socket.on('boostStart', () => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
-      if (player.queue.length === 0) return;
+      if (player.queue.length === 0) return; // Ne peut pas booster sans segments
       if (player.boosting) return;
       player.boosting = true;
       player.boostInterval = setInterval(() => {
         if (player.queue.length > 0) {
+          // Retirer le dernier segment (celui le plus éloigné)
           player.queue.pop();
           player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
           io.to(roomId).emit('update_players', roomsData[roomId].players);
@@ -211,24 +206,23 @@ setInterval(() => {
     const room = roomsData[roomId];
     Object.entries(room.players).forEach(([id, player]) => {
       if (player.direction) {
-        // Sauvegarder la position courante dans l'historique
+        // Sauvegarder la position actuelle dans l'historique
         player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
         if (player.positionHistory.length > 200) {
           player.positionHistory.shift();
         }
 
-        // Calculer la vitesse
+        // Calculer la vitesse (boost ou normal)
         const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
         player.x += player.direction.x * speed;
         player.y += player.direction.y * speed;
 
-        // Calculer un délai fixe pour espacer les segments
-        // La distance désirée entre les centres = taille du joueur (BASE_SIZE * (1 + queue.length * 0.1))
+        // Pour le calcul de l'espacement, on calcule un "fixedDelay"
+        // La distance désirée entre les centres doit être égale à la taille du joueur
         const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
-        // fixedDelay = (taille / vitesse) * SIM_INTERVAL (où SIM_INTERVAL = 10 ms)
         const fixedDelay = (playerSize / (player.boosting ? SPEED_BOOST : SPEED_NORMAL)) * 10;
 
-        // Mettre à jour la queue : pour chaque segment, récupérer la position différée
+        // Mise à jour de la queue : pour chaque segment, récupérer la position différée avec (i+1) * fixedDelay
         for (let i = 0; i < player.queue.length; i++) {
           const delay = (i + 1) * fixedDelay;
           const delayedPos = getDelayedPosition(player.positionHistory, delay);
@@ -239,7 +233,7 @@ setInterval(() => {
           }
         }
 
-        // Vérifier collision avec les parois
+        // Vérifier collisions avec les parois
         if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
           io.to(roomId).emit("player_eliminated", { eliminatedBy: "boundary" });
           delete room.players[id];
@@ -277,11 +271,12 @@ setInterval(() => {
         }
       }
     });
-    // Avant d'envoyer aux clients, on supprime positionHistory pour éviter une profondeur excessive
+
+    // Avant d'envoyer aux clients, supprimer les propriétés inutiles pour éviter les références circulaires
     const playersForUpdate = {};
     Object.entries(room.players).forEach(([id, player]) => {
-      const { positionHistory, ...rest } = player;
-      playersForUpdate[id] = rest;
+      const { positionHistory, boostInterval, ...cleanPlayer } = player;
+      playersForUpdate[id] = cleanPlayer;
     });
     io.to(roomId).emit('update_players', playersForUpdate);
   });
