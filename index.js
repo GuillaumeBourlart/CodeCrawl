@@ -12,15 +12,13 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 
-// Constantes de configuration
+// --- Configuration ---
 const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD133', '#8F33FF'];
 const worldSize = { width: 2000, height: 2000 };
-const ITEM_RADIUS = 10; // Rayon fixe de l'item
-const BASE_SIZE = 20;   // Taille de base du joueur
-const DELAY_MS = 50;    // Facteur de délai pour le positionnement des segments
-const MAX_ITEMS = 50;   // Nombre maximum d'items autorisés dans le canva
-
-// Vitesse (normal et boost)
+const ITEM_RADIUS = 10;
+const BASE_SIZE = 20;
+const MAX_ITEMS = 50; // Nombre maximum d'items autorisés
+// Vitesse
 const SPEED_NORMAL = 2;
 const SPEED_BOOST = 4;
 
@@ -75,7 +73,7 @@ function getExpectedSegments(itemEatenCount) {
   return 5 + Math.floor((itemEatenCount - 5) / 10);
 }
 
-// Rooms en mémoire (chaque room stocke ses joueurs et ses items)
+// Rooms en mémoire
 const roomsData = {};
 
 async function findOrCreateRoom() {
@@ -287,7 +285,7 @@ setInterval(() => {
         const size1 = BASE_SIZE * (1 + (player1.queue.length * 0.1));
         const size2 = BASE_SIZE * (1 + (player2.queue.length * 0.1));
         if (distance < (size1 + size2) / 2) {
-          // Vérifier s'ils se font face (collision frontale)
+          // Collision frontale
           const dot = player1.direction.x * player2.direction.x + player1.direction.y * player2.direction.y;
           if (dot < -0.8) {
             console.log(`Collision frontale détectée entre ${id1} et ${id2}. Élimination mutuelle.`);
@@ -300,25 +298,28 @@ setInterval(() => {
       }
     }
 
+    // Mise à jour de chaque joueur
     Object.entries(room.players).forEach(([id, player]) => {
       if (!player.direction) return;
 
-      // Mise à jour de l'historique de position
+      // Historique de position
       player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
       if (player.positionHistory.length > 10000) {
         player.positionHistory.shift();
       }
 
-      // Calcul de la nouvelle position
+      // Vitesse
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
+      // Mettre à jour position
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
 
-      // Mise à jour de la queue
+      // Calculer le délai fixe pour l'espacement
+      // On revient à l'ancienne formule: (playerSize / speed) * 10
       const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
-      // Utiliser DELAY_MS divisé par 2 en boost pour garder l'espacement constant
-      const delayFactor = player.boosting ? DELAY_MS / 2 : DELAY_MS;
-      const fixedDelay = (playerSize / speed) * delayFactor;
+      const fixedDelay = (playerSize / speed) * 10;
+
+      // Mise à jour de la queue
       for (let i = 0; i < player.queue.length; i++) {
         const delay = (i + 1) * fixedDelay;
         const delayedPos = getDelayedPosition(player.positionHistory, delay);
@@ -329,7 +330,7 @@ setInterval(() => {
         }
       }
 
-      // Collision avec les parois
+      // Collision parois
       if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
         console.log(`Le joueur ${id} a touché une paroi. Élimination.`);
         io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
@@ -337,7 +338,7 @@ setInterval(() => {
         return;
       }
 
-      // Collision avec les items
+      // Collision items
       const haloMargin = playerSize * 0.1;
       const playerRadius = playerSize / 2;
       for (let i = 0; i < room.items.length; i++) {
@@ -347,13 +348,19 @@ setInterval(() => {
           player.itemEatenCount = (player.itemEatenCount || 0) + 1;
           const expectedSegments = getExpectedSegments(player.itemEatenCount);
           if (player.queue.length < expectedSegments) {
-            const newSegmentPos = getDelayedPosition(player.positionHistory, (player.queue.length + 1) * fixedDelay) || { x: player.x, y: player.y };
+            const newSegmentPos = getDelayedPosition(
+              player.positionHistory,
+              (player.queue.length + 1) * fixedDelay
+            ) || { x: player.x, y: player.y };
             player.queue.push(newSegmentPos);
           }
           player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
+
+          // Retirer l'item mangé
           room.items.splice(i, 1);
           i--;
-          // Respawn d'un nouvel item seulement si le nombre maximum n'est pas atteint
+
+          // Respawn uniquement si le nombre d'items < MAX_ITEMS
           if (room.items.length < MAX_ITEMS) {
             const newItem = {
               id: `item-${Date.now()}`,
@@ -369,6 +376,7 @@ setInterval(() => {
         }
       }
     });
+    // Mise à jour de tous les joueurs
     io.to(roomId).emit('update_players', getPlayersForUpdate(room.players));
   });
 }, 10);
