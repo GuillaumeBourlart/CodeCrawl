@@ -224,7 +224,7 @@ setInterval(() => {
         }
 
         // Vérifier collision avec les items (hitbox circulaire)
-        const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.1));
+        const playerSize = BASE_SIZE * (1 + (player.queue.length * 0.01));
         const playerRadius = playerSize / 2;
         for (let i = 0; i < room.items.length; i++) {
           const item = room.items[i];
