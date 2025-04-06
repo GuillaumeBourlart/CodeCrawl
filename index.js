@@ -12,11 +12,13 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 
+// Constantes de configuration
 const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD133', '#8F33FF'];
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10; // Rayon fixe de l'item
 const BASE_SIZE = 20;   // Taille de base du joueur
-const DELAY_MS = 50;    // Décalage par défaut pour la mise à jour des segments
+const DELAY_MS = 50;    // Facteur de délai pour le positionnement des segments
+const MAX_ITEMS = 50;   // Nombre maximum d'items autorisés dans le canva
 
 // Vitesse (normal et boost)
 const SPEED_NORMAL = 2;
@@ -134,9 +136,9 @@ io.on('connection', (socket) => {
     if (!roomsData[roomId]) {
       roomsData[roomId] = {
         players: {},
-        items: generateRandomItems(50, worldSize)
+        items: generateRandomItems(MAX_ITEMS, worldSize)
       };
-      console.log(`Initialisation de la room ${roomId} avec 50 items.`);
+      console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
 
     // Initialiser le joueur
@@ -245,7 +247,7 @@ io.on('connection', (socket) => {
       }
     });
 
-    // Player eliminated event (pour événements déclenchés côté client)
+    // Player eliminated event (côté client)
     socket.on('player_eliminated', (data) => {
       console.log(`Player ${socket.id} éliminé par ${data.eliminatedBy}`);
       delete roomsData[roomId].players[socket.id];
@@ -289,7 +291,6 @@ setInterval(() => {
           const dot = player1.direction.x * player2.direction.x + player1.direction.y * player2.direction.y;
           if (dot < -0.8) {
             console.log(`Collision frontale détectée entre ${id1} et ${id2}. Élimination mutuelle.`);
-            // Émettre l'événement d'élimination uniquement aux joueurs concernés
             io.to(id1).emit("player_eliminated", { eliminatedBy: "collision frontale" });
             io.to(id2).emit("player_eliminated", { eliminatedBy: "collision frontale" });
             delete room.players[id1];
@@ -315,7 +316,9 @@ setInterval(() => {
 
       // Mise à jour de la queue
       const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
-      const fixedDelay = (playerSize / speed) * 10; // ms
+      // Utiliser DELAY_MS divisé par 2 en boost pour garder l'espacement constant
+      const delayFactor = player.boosting ? DELAY_MS / 2 : DELAY_MS;
+      const fixedDelay = (playerSize / speed) * delayFactor;
       for (let i = 0; i < player.queue.length; i++) {
         const delay = (i + 1) * fixedDelay;
         const delayedPos = getDelayedPosition(player.positionHistory, delay);
@@ -329,7 +332,6 @@ setInterval(() => {
       // Collision avec les parois
       if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
         console.log(`Le joueur ${id} a touché une paroi. Élimination.`);
-        // Envoyer l'événement uniquement au joueur concerné
         io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
         delete room.players[id];
         return;
@@ -351,15 +353,17 @@ setInterval(() => {
           player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
           room.items.splice(i, 1);
           i--;
-          // Générer un nouvel item
-          const newItem = {
-            id: `item-${Date.now()}`,
-            x: Math.random() * worldSize.width,
-            y: Math.random() * worldSize.height,
-            value: Math.floor(Math.random() * 5) + 1,
-            color: itemColors[Math.floor(Math.random() * itemColors.length)]
-          };
-          room.items.push(newItem);
+          // Respawn d'un nouvel item seulement si le nombre maximum n'est pas atteint
+          if (room.items.length < MAX_ITEMS) {
+            const newItem = {
+              id: `item-${Date.now()}`,
+              x: Math.random() * worldSize.width,
+              y: Math.random() * worldSize.height,
+              value: Math.floor(Math.random() * 5) + 1,
+              color: itemColors[Math.floor(Math.random() * itemColors.length)]
+            };
+            room.items.push(newItem);
+          }
           io.to(roomId).emit('update_items', room.items);
           break;
         }
