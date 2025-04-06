@@ -16,15 +16,15 @@ const io = new Server(httpServer, { cors: { origin: "*" } });
 const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD133', '#8F33FF'];
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;
-const BASE_SIZE = 20; // On utilisera cette valeur pour définir l'espacement fixe
+const BASE_SIZE = 20;
 const MAX_ITEMS = 50; // Nombre maximum d'items autorisés
-const MAX_TRAIL_LENGTH = 100; // Nombre maximum de points dans le trail
+const DELAY_MS = 50;  // Valeur de base pour le calcul du delay
 
 // Vitesse
 const SPEED_NORMAL = 2;
 const SPEED_BOOST = 4;
 
-// Pour envoyer l'état des joueurs au client
+// Nettoyer les joueurs avant envoi au client
 function getPlayersForUpdate(players) {
   const result = {};
   for (const [id, player] of Object.entries(players)) {
@@ -34,8 +34,7 @@ function getPlayersForUpdate(players) {
       direction: player.direction,
       boosting: player.boosting,
       color: player.color,
-      // La taille visuelle reste constante (BASE_SIZE)
-      length: BASE_SIZE,
+      length: player.length,
       queue: player.queue,
       itemEatenCount: player.itemEatenCount
     };
@@ -43,7 +42,7 @@ function getPlayersForUpdate(players) {
   return result;
 }
 
-// Génération d'items aléatoires
+// Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
   const items = [];
   for (let i = 0; i < count; i++) {
@@ -58,28 +57,25 @@ function generateRandomItems(count, worldSize) {
   return items;
 }
 
-// Fonction qui retourne la position sur le trail correspondant à une distance cumulée donnée
-function getTrailPosition(trail, targetDistance) {
-  let cumulativeDistance = 0;
-  for (let i = 1; i < trail.length; i++) {
-    const dx = trail[i - 1].x - trail[i].x;
-    const dy = trail[i - 1].y - trail[i].y;
-    const segmentDistance = Math.hypot(dx, dy);
-    cumulativeDistance += segmentDistance;
-    if (cumulativeDistance >= targetDistance) {
-      const overshoot = cumulativeDistance - targetDistance;
-      const ratio = overshoot / segmentDistance;
-      return {
-        x: trail[i].x + (trail[i - 1].x - trail[i].x) * (1 - ratio),
-        y: trail[i].y + (trail[i - 1].y - trail[i].y) * (1 - ratio)
-      };
+// Retourne la position différée dans l'historique selon le délai (ms)
+function getDelayedPosition(positionHistory, delay) {
+  const targetTime = Date.now() - delay;
+  if (!positionHistory || positionHistory.length === 0) return null;
+  for (let i = positionHistory.length - 1; i >= 0; i--) {
+    if (positionHistory[i].time <= targetTime) {
+      return { x: positionHistory[i].x, y: positionHistory[i].y };
     }
   }
-  // Si le trail est trop court, retourner le dernier point
-  return trail[trail.length - 1];
+  return { x: positionHistory[0].x, y: positionHistory[0].y };
 }
 
-// Rooms en mémoire
+// Retourne le nombre de segments attendus en fonction des items mangés
+function getExpectedSegments(itemEatenCount) {
+  if (itemEatenCount < 5) return itemEatenCount;
+  return 5 + Math.floor((itemEatenCount - 5) / 10);
+}
+
+// Rooms en mémoire (chaque room stocke ses joueurs et ses items)
 const roomsData = {};
 
 async function findOrCreateRoom() {
@@ -145,7 +141,7 @@ io.on('connection', (socket) => {
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
 
-    // Initialiser le joueur avec une propriété "trail" vide
+    // Initialiser le joueur
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -155,14 +151,14 @@ io.on('connection', (socket) => {
     roomsData[roomId].players[socket.id] = {
       x: Math.random() * 800,
       y: Math.random() * 600,
-      // La taille visuelle reste constante (BASE_SIZE)
       length: BASE_SIZE,
-      queue: [], // Les segments seront positionnés via le trail
-      trail: [], // Nouveau : stocke la trajectoire de la tête
+      queue: [],
+      positionHistory: [],
       direction: defaultDirection,
       boosting: false,
       color: randomColor,
-      itemEatenCount: 0
+      itemEatenCount: 0,
+      lastQueueUpdateTime: 0
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
 
@@ -200,7 +196,7 @@ io.on('connection', (socket) => {
       console.log(`Nouvelle direction pour ${socket.id}:`, newDir);
     });
 
-    // Boost start (pour transformation de segments en items)
+    // Boost start
     socket.on('boostStart', () => {
       console.log(`boostStart déclenché par ${socket.id}`);
       const player = roomsData[roomId].players[socket.id];
@@ -225,6 +221,7 @@ io.on('connection', (socket) => {
           console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
           io.to(roomId).emit('update_items', roomsData[roomId].items);
           player.queue.pop();
+          player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
           io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
         } else {
           clearInterval(player.boostInterval);
@@ -274,7 +271,7 @@ setInterval(() => {
   Object.keys(roomsData).forEach(roomId => {
     const room = roomsData[roomId];
 
-    // Détection de collision frontale entre joueurs (basée sur la tête uniquement)
+    // Détection de collision frontale entre joueurs (basée sur les têtes)
     const playerIds = Object.keys(room.players);
     for (let i = 0; i < playerIds.length; i++) {
       for (let j = i + 1; j < playerIds.length; j++) {
@@ -303,23 +300,31 @@ setInterval(() => {
     Object.entries(room.players).forEach(([id, player]) => {
       if (!player.direction) return;
 
-      // Mettre à jour la position de la tête et ajouter la position au trail
+      // Sauvegarder la position actuelle dans l'historique
+      player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
+      if (player.positionHistory.length > 10000) {
+        player.positionHistory.shift();
+      }
+
+      // Mise à jour de la position de la tête
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
-      player.trail.unshift({ x: player.x, y: player.y });
-      if (player.trail.length > MAX_TRAIL_LENGTH) {
-        player.trail.pop();
-      }
 
-      // Calcul de la position de chaque segment sur le trail
-      // Chaque segment doit suivre exactement le même trajet que la tête,
-      // à une distance fixe (ici, BASE_SIZE multiplié par l'indice du segment)
-      const segmentSpacing = BASE_SIZE;
+      // Calcul du delay : utiliser DELAY_MS/2 en boost, sinon DELAY_MS
+      const delayFactor = player.boosting ? DELAY_MS / 2 : DELAY_MS;
+      const playerSize = BASE_SIZE * (1 + player.queue.length * 0.1);
+      const fixedDelay = (playerSize / speed) * delayFactor;
+
+      // Mise à jour de la queue (basée sur l'historique)
       for (let i = 0; i < player.queue.length; i++) {
-        const targetDistance = (i + 1) * segmentSpacing;
-        const pos = getTrailPosition(player.trail, targetDistance);
-        player.queue[i] = pos;
+        const delay = (i + 1) * fixedDelay;
+        const delayedPos = getDelayedPosition(player.positionHistory, delay);
+        if (delayedPos) {
+          player.queue[i] = delayedPos;
+        } else {
+          player.queue[i] = { x: player.x, y: player.y };
+        }
       }
 
       // Collision avec les parois
@@ -338,18 +343,15 @@ setInterval(() => {
         const dist = Math.hypot(player.x - item.x, player.y - item.y);
         if (dist < (playerRadius + ITEM_RADIUS + haloMargin)) {
           player.itemEatenCount = (player.itemEatenCount || 0) + 1;
-          // Ajouter un nouveau segment à la fin de la queue en se basant sur le trail
-          if (player.queue.length === 0) {
-            player.queue.push({ x: player.x, y: player.y });
-          } else {
-            // Utiliser la position du dernier segment
-            const lastSeg = player.queue[player.queue.length - 1];
-            player.queue.push({ x: lastSeg.x, y: lastSeg.y });
+          const expectedSegments = getExpectedSegments(player.itemEatenCount);
+          if (player.queue.length < expectedSegments) {
+            const newSegmentPos = getDelayedPosition(player.positionHistory, (player.queue.length + 1) * fixedDelay) || { x: player.x, y: player.y };
+            player.queue.push(newSegmentPos);
           }
-          // Retirer l'item mangé
+          player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
           room.items.splice(i, 1);
           i--;
-          // Respawn d'un nouvel item si room.items.length < MAX_ITEMS
+          // Respawn d'un nouvel item uniquement si room.items.length < MAX_ITEMS
           if (room.items.length < MAX_ITEMS) {
             const newItem = {
               id: `item-${Date.now()}`,
@@ -368,26 +370,6 @@ setInterval(() => {
     io.to(roomId).emit('update_players', getPlayersForUpdate(room.players));
   });
 }, 10);
-
-// Fonction de calcul de position sur le trail en fonction d'une distance cible
-function getTrailPosition(trail, targetDistance) {
-  let cumulativeDistance = 0;
-  for (let i = 1; i < trail.length; i++) {
-    const dx = trail[i - 1].x - trail[i].x;
-    const dy = trail[i - 1].y - trail[i].y;
-    const d = Math.hypot(dx, dy);
-    cumulativeDistance += d;
-    if (cumulativeDistance >= targetDistance) {
-      const overshoot = cumulativeDistance - targetDistance;
-      const ratio = overshoot / d;
-      return {
-        x: trail[i].x + (trail[i - 1].x - trail[i].x) * (1 - ratio),
-        y: trail[i].y + (trail[i - 1].y - trail[i].y) * (1 - ratio)
-      };
-    }
-  }
-  return trail[trail.length - 1];
-}
 
 app.get('/', (req, res) => {
   res.send("Hello from the Snake.io-like server!");
