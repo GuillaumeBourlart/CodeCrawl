@@ -163,13 +163,38 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('update_items', roomsData[roomId].items);
 
     // Le client change seulement la direction via "changeDirection"
+   // --- Modification pour empêcher un demi-tour brutal (changement de direction trop radical)
     socket.on('changeDirection', (data) => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
       const { x, y } = data.direction;
       const mag = Math.sqrt(x * x + y * y) || 1;
-      player.direction = { x: x / mag, y: y / mag };
+      let newDir = { x: x / mag, y: y / mag };
+
+      // Limiter le changement de direction pour éviter un demi-tour brutal
+      const currentDir = player.direction;
+      // Calcul du produit scalaire pour obtenir l'angle entre les vecteurs
+      const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
+      const clampedDot = Math.min(Math.max(dot, -1), 1);
+      const angleDiff = Math.acos(clampedDot);
+      const maxAngle = Math.PI / 3; // 60° maximum
+
+      if (angleDiff > maxAngle) {
+        // Calculer le signe de la rotation (produit vectoriel)
+        const cross = currentDir.x * newDir.y - currentDir.y * newDir.x;
+        const sign = cross >= 0 ? 1 : -1;
+        // Fonction pour faire pivoter un vecteur d'un angle (radians)
+        function rotateVector(vec, angle) {
+          return {
+            x: vec.x * Math.cos(angle) - vec.y * Math.sin(angle),
+            y: vec.x * Math.sin(angle) + vec.y * Math.cos(angle)
+          };
+        }
+        newDir = rotateVector(currentDir, sign * maxAngle);
+      }
+      player.direction = newDir;
     });
+    // --- Fin modification changeDirection
 
     // Gestion du boost via "boostStart" et "boostStop"
     socket.on('boostStart', () => {
