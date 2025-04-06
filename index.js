@@ -16,11 +16,11 @@ const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;    // Rayon fixe de l'item
 const BASE_SIZE = 20;      // Taille de base du joueur
-const DELAY_MS = 50;       // Valeur de base pour la mise à jour (en ms)
+const DELAY_MS = 30;       // Valeur de base pour la mise à jour (en ms)
 
 // Vitesse (en pixels par intervalle de 10 ms)
 const SPEED_NORMAL = 2;
-const SPEED_BOOST = 4;
+const SPEED_BOOST = 3;
 
 // Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
