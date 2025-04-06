@@ -234,16 +234,21 @@ io.on('connection', (socket) => {
 
     // Boost stop
     socket.on('boostStop', () => {
-      console.log(`boostStop déclenché par ${socket.id}`);
-      const player = roomsData[roomId].players[socket.id];
-      if (!player) return;
-      if (player.boosting) {
-        clearInterval(player.boostInterval);
-        player.boosting = false;
-        console.log(`Boost arrêté pour ${socket.id}`);
-        io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
-      }
-    });
+  console.log(`boostStop déclenché par ${socket.id}`);
+  const player = roomsData[roomId].players[socket.id];
+  if (!player) return;
+  if (player.boosting) {
+    clearInterval(player.boostInterval);
+    player.boosting = false;
+    // Réinitialiser l'historique pour recalculer instantanément la queue
+    player.positionHistory = [{ x: player.x, y: player.y, time: Date.now() }];
+    // Optionnel : vider la file et la reconstruire si besoin
+    // player.queue = [];
+    console.log(`Boost arrêté pour ${socket.id} et historique réinitialisé.`);
+    io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
+  }
+});
+
 
     // Player eliminated event (côté client)
     socket.on('player_eliminated', (data) => {
