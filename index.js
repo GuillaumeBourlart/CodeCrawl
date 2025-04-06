@@ -3,12 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { createClient } from '@supabase/supabase-js';
 
-const {
-  SUPABASE_URL = '',
-  SUPABASE_ANON_KEY = '',
-  PORT = 3000
-} = process.env;
-
+const { SUPABASE_URL = '', SUPABASE_ANON_KEY = '', PORT = 3000 } = process.env;
 console.log("SUPABASE_URL:", SUPABASE_URL);
 console.log("SUPABASE_ANON_KEY:", SUPABASE_ANON_KEY ? "<non-empty>" : "<EMPTY>");
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -21,7 +16,19 @@ const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;    // Rayon fixe de l'item
 const BASE_SIZE = 20;      // Taille de base du joueur
-const QUEUE_UPDATE_INTERVAL = 50; // Intervalle de mise à jour de la queue en ms
+const DELAY_MS = 50;       // Décalage par défaut (ms) pour la mise à jour des segments
+
+// Fonction utilitaire : renvoie la position différée dans l'historique selon le délai (en ms)
+function getDelayedPosition(positionHistory, delay) {
+  const targetTime = Date.now() - delay;
+  if (!positionHistory || positionHistory.length === 0) return null;
+  for (let i = positionHistory.length - 1; i >= 0; i--) {
+    if (positionHistory[i].time <= targetTime) {
+      return { x: positionHistory[i].x, y: positionHistory[i].y };
+    }
+  }
+  return { x: positionHistory[0].x, y: positionHistory[0].y };
+}
 
 // Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
@@ -38,13 +45,14 @@ function generateRandomItems(count, worldSize) {
   return items;
 }
 
-// Retourne le nombre de segments attendus selon le nombre d'items mangés
+// Retourne le nombre de segments attendus en fonction du nombre d'items mangés
 function getExpectedSegments(itemEatenCount) {
   if (itemEatenCount < 5) return itemEatenCount;
   return 5 + Math.floor((itemEatenCount - 5) / 10);
 }
 
-// Rooms en mémoire : chaque room stocke ses joueurs et ses items.
+// Rooms en mémoire
+// Chaque room stocke ses joueurs et ses items.
 const roomsData = {};
 
 async function findOrCreateRoom() {
@@ -90,10 +98,11 @@ async function leaveRoom(roomId) {
   await supabase.from('rooms').update({ current_players: newCount }).eq('id', roomId);
 }
 
-// Lorsqu'un joueur boost, la vitesse est plus élevée (par exemple 4 vs 2)
+// Vitesse
 const SPEED_NORMAL = 2;
 const SPEED_BOOST = 4;
 
+// Gestion des connexions
 io.on('connection', (socket) => {
   console.log('Nouveau client connecté:', socket.id);
   (async () => {
@@ -113,12 +122,7 @@ io.on('connection', (socket) => {
       };
     }
 
-    // Initialisation du joueur avec :
-    // - position aléatoire
-    // - queue et historique vides
-    // - direction par défaut aléatoire (normalisée)
-    // - couleur aléatoire
-    // - compteur d'items mangés à 0
+    // Initialiser le joueur avec : position aléatoire, queue et historique vides, direction aléatoire, couleur aléatoire, etc.
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -204,26 +208,22 @@ setInterval(() => {
           player.positionHistory.shift();
         }
 
+        // Calculer le délai courant pour la mise à jour de la queue (le boost ne modifie pas l'espacement)
+        const currentDelay = DELAY_MS;
+
         // Mise à jour de la queue :
-        // Toutes les 50 ms, on met à jour la position de chaque segment :
-        // Le premier segment prend la position de la tête avant mise à jour,
-        // et chaque segment suivant prend la position précédemment détenue par son prédécesseur.
-        if (Date.now() - (player.lastQueueUpdateTime || 0) >= QUEUE_UPDATE_INTERVAL) {
-          const newQueue = [];
-          if (player.queue.length > 0) {
-            newQueue[0] = previousHead; // Le premier segment suit la tête
-            for (let i = 1; i < player.queue.length; i++) {
-              newQueue[i] = player.queue[i - 1]; // Chaque segment suit le segment précédent
-            }
-          }
-          // On met à jour la queue seulement si elle existe (sinon, rien à faire)
-          if (newQueue.length > 0) {
-            player.queue = newQueue;
-            player.lastQueueUpdateTime = Date.now();
+        // Pour chaque segment existant, on met à jour sa position en utilisant (i+1)*currentDelay
+        for (let i = 0; i < player.queue.length; i++) {
+          const delay = (i + 1) * currentDelay;
+          const delayedPos = getDelayedPosition(player.positionHistory, delay);
+          if (delayedPos) {
+            player.queue[i] = delayedPos;
+          } else {
+            player.queue[i] = { x: player.x, y: player.y };
           }
         }
 
-        // Vérifier collision avec les parois
+        // Vérifier collisions avec les parois
         if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
           io.to(roomId).emit("player_eliminated", { eliminatedBy: "boundary" });
           delete room.players[id];
@@ -246,14 +246,13 @@ setInterval(() => {
               ? player.itemEatenCount
               : 5 + Math.floor((player.itemEatenCount - 5) / 10);
             if (player.queue.length < expectedSegments) {
-              // Pour le nouveau segment, on prend la position différée correspondant au délai (ici 50ms)
-              const newSegmentPos = getDelayedPosition(player.positionHistory, QUEUE_UPDATE_INTERVAL)
+              const newSegmentPos = getDelayedPosition(player.positionHistory, (player.queue.length + 1) * currentDelay)
                 || { x: player.x, y: player.y };
               player.queue.push(newSegmentPos);
             }
             // Ajuster la taille du joueur
             player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
-            // Supprimer l'item et générer un nouvel item
+            // Supprimer l'item et en générer un nouveau
             room.items.splice(i, 1);
             i--;
             const newItem = {
