@@ -197,7 +197,7 @@ setInterval(() => {
     Object.entries(room.players).forEach(([id, player]) => {
       if (player.direction) {
         // Utiliser la vitesse appropriée
-        const speed = player.boosting ? 10 : 5;
+        const speed = player.boosting ? 2 : 1;
         player.x += player.direction.x * speed;
         player.y += player.direction.y * speed;
 
