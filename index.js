@@ -16,14 +16,15 @@ const io = new Server(httpServer, { cors: { origin: "*" } });
 const itemColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', '#FFD133', '#8F33FF'];
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;
-const BASE_SIZE = 20; // Taille constante pour le joueur et l'espacement entre segments
+const BASE_SIZE = 20; // On utilisera cette valeur pour définir l'espacement fixe
 const MAX_ITEMS = 50; // Nombre maximum d'items autorisés
+const MAX_TRAIL_LENGTH = 100; // Nombre maximum de points dans le trail
 
 // Vitesse
 const SPEED_NORMAL = 2;
 const SPEED_BOOST = 4;
 
-// Pour la gestion des joueurs à renvoyer au client
+// Pour envoyer l'état des joueurs au client
 function getPlayersForUpdate(players) {
   const result = {};
   for (const [id, player] of Object.entries(players)) {
@@ -33,7 +34,7 @@ function getPlayersForUpdate(players) {
       direction: player.direction,
       boosting: player.boosting,
       color: player.color,
-      // La taille reste constante (BASE_SIZE)
+      // La taille visuelle reste constante (BASE_SIZE)
       length: BASE_SIZE,
       queue: player.queue,
       itemEatenCount: player.itemEatenCount
@@ -42,7 +43,7 @@ function getPlayersForUpdate(players) {
   return result;
 }
 
-// Génère des items aléatoires pour une room
+// Génération d'items aléatoires
 function generateRandomItems(count, worldSize) {
   const items = [];
   for (let i = 0; i < count; i++) {
@@ -57,8 +58,27 @@ function generateRandomItems(count, worldSize) {
   return items;
 }
 
-// Ici, on n'utilise plus l'historique pour les segments.
-  
+// Fonction qui retourne la position sur le trail correspondant à une distance cumulée donnée
+function getTrailPosition(trail, targetDistance) {
+  let cumulativeDistance = 0;
+  for (let i = 1; i < trail.length; i++) {
+    const dx = trail[i - 1].x - trail[i].x;
+    const dy = trail[i - 1].y - trail[i].y;
+    const segmentDistance = Math.hypot(dx, dy);
+    cumulativeDistance += segmentDistance;
+    if (cumulativeDistance >= targetDistance) {
+      const overshoot = cumulativeDistance - targetDistance;
+      const ratio = overshoot / segmentDistance;
+      return {
+        x: trail[i].x + (trail[i - 1].x - trail[i].x) * (1 - ratio),
+        y: trail[i].y + (trail[i - 1].y - trail[i].y) * (1 - ratio)
+      };
+    }
+  }
+  // Si le trail est trop court, retourner le dernier point
+  return trail[trail.length - 1];
+}
+
 // Rooms en mémoire
 const roomsData = {};
 
@@ -125,7 +145,7 @@ io.on('connection', (socket) => {
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
 
-    // Initialiser le joueur
+    // Initialiser le joueur avec une propriété "trail" vide
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -135,9 +155,10 @@ io.on('connection', (socket) => {
     roomsData[roomId].players[socket.id] = {
       x: Math.random() * 800,
       y: Math.random() * 600,
+      // La taille visuelle reste constante (BASE_SIZE)
       length: BASE_SIZE,
-      queue: [], // Initialement vide
-      // On n'utilise plus positionHistory pour le suivi
+      queue: [], // Les segments seront positionnés via le trail
+      trail: [], // Nouveau : stocke la trajectoire de la tête
       direction: defaultDirection,
       boosting: false,
       color: randomColor,
@@ -179,7 +200,7 @@ io.on('connection', (socket) => {
       console.log(`Nouvelle direction pour ${socket.id}:`, newDir);
     });
 
-    // Boost start
+    // Boost start (pour transformation de segments en items)
     socket.on('boostStart', () => {
       console.log(`boostStart déclenché par ${socket.id}`);
       const player = roomsData[roomId].players[socket.id];
@@ -190,11 +211,8 @@ io.on('connection', (socket) => {
       }
       if (player.boosting) return;
       player.boosting = true;
-      // Pendant le boost, on utilise toujours la même méthode de mise à jour (contrainte de distance fixe)
-      // Le boost n'influence plus l'espacement
       player.boostInterval = setInterval(() => {
         if (player.queue.length > 0) {
-          // On transforme le dernier segment en item
           const droppedSegment = player.queue[player.queue.length - 1];
           const droppedItem = {
             id: `dropped-${Date.now()}`,
@@ -256,7 +274,7 @@ setInterval(() => {
   Object.keys(roomsData).forEach(roomId => {
     const room = roomsData[roomId];
 
-    // Détection de collision frontale entre joueurs
+    // Détection de collision frontale entre joueurs (basée sur la tête uniquement)
     const playerIds = Object.keys(room.players);
     for (let i = 0; i < playerIds.length; i++) {
       for (let j = i + 1; j < playerIds.length; j++) {
@@ -285,27 +303,23 @@ setInterval(() => {
     Object.entries(room.players).forEach(([id, player]) => {
       if (!player.direction) return;
 
-      // Mettre à jour la tête
+      // Mettre à jour la position de la tête et ajouter la position au trail
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
+      player.trail.unshift({ x: player.x, y: player.y });
+      if (player.trail.length > MAX_TRAIL_LENGTH) {
+        player.trail.pop();
+      }
 
-      // Mise à jour de la queue par contrainte de distance fixe
-      // On veut que chaque segment reste exactement à BASE_SIZE derrière le segment précédent.
-      const spacing = BASE_SIZE;
+      // Calcul de la position de chaque segment sur le trail
+      // Chaque segment doit suivre exactement le même trajet que la tête,
+      // à une distance fixe (ici, BASE_SIZE multiplié par l'indice du segment)
+      const segmentSpacing = BASE_SIZE;
       for (let i = 0; i < player.queue.length; i++) {
-        const leader = i === 0 ? { x: player.x, y: player.y } : player.queue[i - 1];
-        const seg = player.queue[i];
-        const dx = seg.x - leader.x;
-        const dy = seg.y - leader.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist === 0) {
-          seg.x = leader.x;
-          seg.y = leader.y;
-        } else {
-          seg.x = leader.x + (dx / dist) * spacing;
-          seg.y = leader.y + (dy / dist) * spacing;
-        }
+        const targetDistance = (i + 1) * segmentSpacing;
+        const pos = getTrailPosition(player.trail, targetDistance);
+        player.queue[i] = pos;
       }
 
       // Collision avec les parois
@@ -324,18 +338,18 @@ setInterval(() => {
         const dist = Math.hypot(player.x - item.x, player.y - item.y);
         if (dist < (playerRadius + ITEM_RADIUS + haloMargin)) {
           player.itemEatenCount = (player.itemEatenCount || 0) + 1;
-          // Ajout d'un nouveau segment à la fin de la queue, initialisé à la position du dernier segment
+          // Ajouter un nouveau segment à la fin de la queue en se basant sur le trail
           if (player.queue.length === 0) {
-            // Si la queue est vide, le premier segment prend la position de la tête
             player.queue.push({ x: player.x, y: player.y });
           } else {
+            // Utiliser la position du dernier segment
             const lastSeg = player.queue[player.queue.length - 1];
             player.queue.push({ x: lastSeg.x, y: lastSeg.y });
           }
           // Retirer l'item mangé
           room.items.splice(i, 1);
           i--;
-          // Respawn d'un nouvel item si nécessaire
+          // Respawn d'un nouvel item si room.items.length < MAX_ITEMS
           if (room.items.length < MAX_ITEMS) {
             const newItem = {
               id: `item-${Date.now()}`,
@@ -354,6 +368,26 @@ setInterval(() => {
     io.to(roomId).emit('update_players', getPlayersForUpdate(room.players));
   });
 }, 10);
+
+// Fonction de calcul de position sur le trail en fonction d'une distance cible
+function getTrailPosition(trail, targetDistance) {
+  let cumulativeDistance = 0;
+  for (let i = 1; i < trail.length; i++) {
+    const dx = trail[i - 1].x - trail[i].x;
+    const dy = trail[i - 1].y - trail[i].y;
+    const d = Math.hypot(dx, dy);
+    cumulativeDistance += d;
+    if (cumulativeDistance >= targetDistance) {
+      const overshoot = cumulativeDistance - targetDistance;
+      const ratio = overshoot / d;
+      return {
+        x: trail[i].x + (trail[i - 1].x - trail[i].x) * (1 - ratio),
+        y: trail[i].y + (trail[i - 1].y - trail[i].y) * (1 - ratio)
+      };
+    }
+  }
+  return trail[trail.length - 1];
+}
 
 app.get('/', (req, res) => {
   res.send("Hello from the Snake.io-like server!");
