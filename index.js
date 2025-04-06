@@ -128,7 +128,8 @@ io.on('connection', (socket) => {
       return;
     }
     const roomId = room.id;
-    console.log(Le joueur ${socket.id} rejoint la room ${roomId});
+    console.log(`Le joueur ${socket.id} rejoint la room ${roomId}`);
+
 
     if (!roomsData[roomId]) {
       roomsData[roomId] = {
