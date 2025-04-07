@@ -313,7 +313,7 @@ setInterval(() => {
       player.y += player.direction.y * speed;
 
       // Calcul du delay fixe : temps nécessaire pour parcourir la taille actuelle d'un cercle
-      const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.01);
+      const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.1);
       const fixedDelay = currentCircleSize / speed;
 
       // Mise à jour de la file basée sur l'historique
@@ -335,36 +335,39 @@ setInterval(() => {
         return;
       }
 
-      // Collision avec les items
-      const haloMargin = BASE_SIZE * 0.1;
-      const playerRadius = BASE_SIZE / 2;
-      for (let i = 0; i < room.items.length; i++) {
-        const item = room.items[i];
-        const dist = Math.hypot(player.x - item.x, player.y - item.y);
-        if (dist < (playerRadius + ITEM_RADIUS + haloMargin)) {
-          player.itemEatenCount = (player.itemEatenCount || 0) + 1;
-          if (player.queue.length === 0) {
-            player.queue.push({ x: player.x, y: player.y });
-          } else {
-            const lastSeg = player.queue[player.queue.length - 1];
-            player.queue.push({ x: lastSeg.x, y: lastSeg.y });
-          }
-          room.items.splice(i, 1);
-          i--;
-          // Respawn d'un nouvel item si nécessaire
-          if (room.items.length < MAX_ITEMS) {
-            const newItem = {
-              id: `item-${Date.now()}`,
-              x: Math.random() * worldSize.width,
-              y: Math.random() * worldSize.height,
-              value: Math.floor(Math.random() * 5) + 1,
-              color: itemColors[Math.floor(Math.random() * itemColors.length)]
-            };
-            room.items.push(newItem);
-          }
-          io.to(roomId).emit('update_items', room.items);
-          break;
-        }
+     // Collision avec les items
+const dist = Math.hypot(player.x - item.x, player.y - item.y);
+if (dist < (playerRadius + ITEM_RADIUS + haloMargin)) {
+  // Mise à jour du compteur d'items mangés
+  player.itemEatenCount = (player.itemEatenCount || 0) + 1;
+  
+  // Ajouter un segment seulement si nécessaire
+  if (player.queue.length < getExpectedSegments(player.itemEatenCount)) {
+    if (player.queue.length === 0) {
+      player.queue.push({ x: player.x, y: player.y });
+    } else {
+      const lastSeg = player.queue[player.queue.length - 1];
+      player.queue.push({ x: lastSeg.x, y: lastSeg.y });
+    }
+  }
+  
+  room.items.splice(i, 1);
+  i--;
+  // Respawn d'un nouvel item si nécessaire
+  if (room.items.length < MAX_ITEMS) {
+    const newItem = {
+      id: `item-${Date.now()}`,
+      x: Math.random() * worldSize.width,
+      y: Math.random() * worldSize.height,
+      value: Math.floor(Math.random() * 5) + 1,
+      color: itemColors[Math.floor(Math.random() * itemColors.length)]
+    };
+    room.items.push(newItem);
+  }
+  io.to(roomId).emit('update_items', room.items);
+  break;
+}
+
       }
     });
     io.to(roomId).emit('update_players', getPlayersForUpdate(room.players));
