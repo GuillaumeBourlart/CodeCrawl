@@ -221,7 +221,7 @@ io.on("connection", (socket) => {
       const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
       const clampedDot = Math.min(Math.max(dot, -1), 1);
       const angleDiff = Math.acos(clampedDot);
-      const maxAngle = Math.PI / 12;
+      const maxAngle = Math.PI / 9;
       if (angleDiff > maxAngle) {
         const cross = currentDir.x * newDir.y - currentDir.y * newDir.x;
         const sign = cross >= 0 ? 1 : -1;
