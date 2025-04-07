@@ -252,11 +252,31 @@ socket.on('boostStart', () => {
     });
 
     // Player eliminated event (côté client)
-    socket.on('player_eliminated', (data) => {
-      console.log(`Player ${socket.id} éliminé par ${data.eliminatedBy}`);
-      delete roomsData[roomId].players[socket.id];
-      io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
+   // Lorsqu'un joueur est éliminé, convertir tous ses segments en items
+socket.on('player_eliminated', (data) => {
+  console.log(`Player ${socket.id} éliminé par ${data.eliminatedBy}`);
+  const player = roomsData[roomId].players[socket.id];
+  if (player) {
+    // Pour chaque segment de la queue, créer un item
+    player.queue.forEach(segment => {
+      const droppedItem = {
+        id: `dropped-${Date.now()}-${Math.random()}`,
+        x: segment.x,
+        y: segment.y,
+        value: 0,
+        color: player.color,
+        dropTime: Date.now() // Vous pouvez éventuellement utiliser dropTime pour une logique future
+      };
+      roomsData[roomId].items.push(droppedItem);
     });
+    // Envoyer la mise à jour des items aux clients
+    io.to(roomId).emit('update_items', roomsData[roomId].items);
+  }
+  // Supprimer le joueur de la room
+  delete roomsData[roomId].players[socket.id];
+  io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
+});
+
 
     // Disconnect
     socket.on('disconnect', async (reason) => {
@@ -317,7 +337,7 @@ setInterval(() => {
       player.y += player.direction.y * speed;
 
       // Calcul du delay fixe : temps nécessaire pour parcourir la taille actuelle d'un cercle
-      const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.1);
+      const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.5);
       const fixedDelay = currentCircleSize / speed;
 
       // Mise à jour de la file basée sur l'historique
