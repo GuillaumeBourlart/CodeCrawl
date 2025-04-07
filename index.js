@@ -1,4 +1,3 @@
-
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -86,8 +85,7 @@ function getDelayedPosition(positionHistory, delay) {
   return { x: positionHistory[0].x, y: positionHistory[0].y };
 }
 
-// Retourne le nombre de segments attendus en fonction des items mangés
-// Désormais, dès 5 items mangés, chaque 5 items supplémentaires ajoutent un segment.
+// Dès 5 items mangés, chaque tranche de 5 items supplémentaires ajoute un segment.
 function getExpectedSegments(itemEatenCount) {
   if (itemEatenCount < 5) return itemEatenCount;
   return 5 + Math.floor((itemEatenCount - 5) / 5);
@@ -182,23 +180,24 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
     io.to(roomId).emit('update_items', roomsData[roomId].items);
 
-    // Modification de changeDirection : on met à jour targetDirection puis on effectue une rotation en boucle
-  // Changement de direction
+    // Changement de direction : on met à jour targetDirection, puis on applique une rotation limitée à 30° par appel
     socket.on('changeDirection', (data) => {
       console.log(`changeDirection reçu de ${socket.id}:`, data);
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
       const { x, y } = data.direction;
       const mag = Math.sqrt(x * x + y * y) || 1;
-      let newDir = { x: x / mag, y: y / mag };
-      // Limiter le changement de direction
+      const targetDir = { x: x / mag, y: y / mag };
+      // On met à jour targetDirection pour référence
+      player.targetDirection = targetDir;
+      // Appliquer une rotation maximale de 30° par appel
       const currentDir = player.direction;
-      const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
+      const dot = currentDir.x * targetDir.x + currentDir.y * targetDir.y;
       const clampedDot = Math.min(Math.max(dot, -1), 1);
       const angleDiff = Math.acos(clampedDot);
       const maxAngle = Math.PI / 6;
       if (angleDiff > maxAngle) {
-        const cross = currentDir.x * newDir.y - currentDir.y * newDir.x;
+        const cross = currentDir.x * targetDir.y - currentDir.y * targetDir.x;
         const sign = cross >= 0 ? 1 : -1;
         function rotateVector(vec, angle) {
           return {
@@ -206,24 +205,23 @@ io.on('connection', (socket) => {
             y: vec.x * Math.sin(angle) + vec.y * Math.cos(angle)
           };
         }
-        newDir = rotateVector(currentDir, sign * maxAngle);
+        player.direction = rotateVector(currentDir, sign * maxAngle);
+      } else {
+        player.direction = targetDir;
       }
-      player.direction = newDir;
-      console.log(`Nouvelle direction pour ${socket.id}:`, newDir);
+      console.log(`Nouvelle direction pour ${socket.id}:`, player.direction);
     });
-
 
     // Boost start : retirer immédiatement un segment avant de démarrer l'intervalle
     socket.on('boostStart', () => {
       console.log(`boostStart déclenché par ${socket.id}`);
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
-      // Si la queue est vide, on ne peut pas booster
       if (player.queue.length === 0) {
         console.log(`boostStart impossible pour ${socket.id} car la queue est vide.`);
         return;
       }
-      // Retirer immédiatement un segment et le transformer en item
+      // Retirer immédiatement un segment
       {
         const droppedSegment = player.queue.pop();
         const droppedItem = {
@@ -349,11 +347,8 @@ setInterval(() => {
         const targetDir = player.targetDirection;
         const dot = currentDir.x * targetDir.x + currentDir.y * targetDir.y;
         const angleDiff = Math.acos(Math.min(Math.max(dot, -1), 1));
-        // On applique un pas de rotation de 30° à chaque simulation
-        const stepAngle = Math.PI / 6;
+        const stepAngle = Math.PI / 6; // 30° par tick
         if (angleDiff > 0.001) {
-          // Tant que l'angle restant est supérieur ou égal à 30°,
-          // appliquer un pas de 30°
           while (angleDiff >= stepAngle) {
             const cross = currentDir.x * targetDir.y - currentDir.y * targetDir.x;
             const sign = cross >= 0 ? 1 : -1;
@@ -363,7 +358,6 @@ setInterval(() => {
               x: player.direction.x * cosA - player.direction.y * sinA * sign,
               y: player.direction.x * sinA * sign + player.direction.y * cosA
             };
-            // Recalculer l'angle après rotation
             const newDot = player.direction.x * targetDir.x + player.direction.y * targetDir.y;
             const newAngleDiff = Math.acos(Math.min(Math.max(newDot, -1), 1));
             if (newAngleDiff < stepAngle) {
@@ -374,7 +368,7 @@ setInterval(() => {
         }
       }
 
-      // Enregistrer la position actuelle dans l'historique
+      // Enregistrer la position dans l'historique
       player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
       if (player.positionHistory.length > 10000) {
         player.positionHistory.shift();
@@ -385,11 +379,11 @@ setInterval(() => {
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
 
-      // Calcul du delay fixe pour espacer la queue
+      // Calcul du delay pour espacer la queue
       const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.5);
       const fixedDelay = currentCircleSize / speed;
 
-      // Mise à jour de la queue basée sur l'historique
+      // Mise à jour de la queue selon l'historique
       for (let i = 0; i < player.queue.length; i++) {
         const delay = (i + 1) * fixedDelay;
         const delayedPos = getDelayedPosition(player.positionHistory, delay);
