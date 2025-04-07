@@ -198,41 +198,45 @@ io.on('connection', (socket) => {
     
 
      // Boost start
-    socket.on('boostStart', () => {
-      console.log(`boostStart déclenché par ${socket.id}`);
-      const player = roomsData[roomId].players[socket.id];
-      if (!player) return;
-      if (player.queue.length === 0) {
-        console.log(`boostStart impossible pour ${socket.id} car la queue est vide.`);
-        return;
-      }
-      if (player.boosting) return;
-      player.boosting = true;
-      player.boostInterval = setInterval(() => {
-        if (player.queue.length > 0) {
-          const droppedSegment = player.queue[player.queue.length - 1];
-          const droppedItem = {
-            id: `dropped-${Date.now()}`,
-            x: droppedSegment.x,
-            y: droppedSegment.y,
-            value: 0,
-            color: player.color
-          };
-          roomsData[roomId].items.push(droppedItem);
-          console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
-          io.to(roomId).emit('update_items', roomsData[roomId].items);
-          player.queue.pop();
-          player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
-          io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
-        } else {
-          clearInterval(player.boostInterval);
-          player.boosting = false;
-          console.log(`Fin du boost pour ${socket.id} car la queue est vide.`);
-          io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
-        }
-      }, 500);
+   // Boost start
+socket.on('boostStart', () => {
+  console.log(`boostStart déclenché par ${socket.id}`);
+  const player = roomsData[roomId].players[socket.id];
+  if (!player) return;
+  if (player.queue.length === 0) {
+    console.log(`boostStart impossible pour ${socket.id} car la queue est vide.`);
+    return;
+  }
+  if (player.boosting) return;
+  player.boosting = true;
+  player.boostInterval = setInterval(() => {
+    if (player.queue.length > 0) {
+      const droppedSegment = player.queue[player.queue.length - 1];
+      const droppedItem = {
+        id: `dropped-${Date.now()}`,
+        x: droppedSegment.x,
+        y: droppedSegment.y,
+        value: 0,
+        color: player.color,
+        owner: socket.id,      // Propriétaire de l'item
+        dropTime: Date.now()   // Date de dépôt (en ms)
+      };
+      roomsData[roomId].items.push(droppedItem);
+      console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
+      io.to(roomId).emit('update_items', roomsData[roomId].items);
+      player.queue.pop();
+      player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
       io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
-    });
+    } else {
+      clearInterval(player.boostInterval);
+      player.boosting = false;
+      console.log(`Fin du boost pour ${socket.id} car la queue est vide.`);
+      io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
+    }
+  }, 500);
+  io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
+});
+
 
     // Boost stop
     socket.on('boostStop', () => {
@@ -336,39 +340,47 @@ setInterval(() => {
       }
 
      // Collision avec les items
-      const haloMargin = BASE_SIZE * 0.1;
-      const playerRadius = BASE_SIZE / 2;
-      for (let i = 0; i < room.items.length; i++) {
-        const item = room.items[i];
-        const dist = Math.hypot(player.x - item.x, player.y - item.y);
-        if (dist < (playerRadius + ITEM_RADIUS + haloMargin)) {
-          player.itemEatenCount = (player.itemEatenCount || 0) + 1;
-          // Ajoute un segment seulement si le nombre de segments est inférieur au nombre attendu
-          if (player.queue.length < getExpectedSegments(player.itemEatenCount)) {
-            if (player.queue.length === 0) {
-              player.queue.push({ x: player.x, y: player.y });
-            } else {
-              const lastSeg = player.queue[player.queue.length - 1];
-              player.queue.push({ x: lastSeg.x, y: lastSeg.y });
-            }
-          }
-          room.items.splice(i, 1);
-          i--;
-          // Respawn d'un nouvel item si nécessaire
-          if (room.items.length < MAX_ITEMS) {
-            const newItem = {
-              id: `item-${Date.now()}`,
-              x: Math.random() * worldSize.width,
-              y: Math.random() * worldSize.height,
-              value: Math.floor(Math.random() * 5) + 1,
-              color: itemColors[Math.floor(Math.random() * itemColors.length)]
-            };
-            room.items.push(newItem);
-          }
-          io.to(roomId).emit('update_items', room.items);
-          break;
-        }
+      // Collision avec les items
+const haloMargin = BASE_SIZE * 0.1;
+const playerRadius = BASE_SIZE / 2;
+for (let i = 0; i < room.items.length; i++) {
+  const item = room.items[i];
+
+  // Si l'item appartient au joueur et a été déposé il y a moins de 10 secondes, on l'ignore
+  if (item.owner && item.owner === id) {
+    if (Date.now() - item.dropTime < 10000) continue;
+  }
+  
+  const dist = Math.hypot(player.x - item.x, player.y - item.y);
+  if (dist < (playerRadius + ITEM_RADIUS + haloMargin)) {
+    player.itemEatenCount = (player.itemEatenCount || 0) + 1;
+    // Ajoute un segment seulement si le nombre de segments est inférieur au nombre attendu
+    if (player.queue.length < getExpectedSegments(player.itemEatenCount)) {
+      if (player.queue.length === 0) {
+        player.queue.push({ x: player.x, y: player.y });
+      } else {
+        const lastSeg = player.queue[player.queue.length - 1];
+        player.queue.push({ x: lastSeg.x, y: lastSeg.y });
       }
+    }
+    room.items.splice(i, 1);
+    i--;
+    // Respawn d'un nouvel item si nécessaire
+    if (room.items.length < MAX_ITEMS) {
+      const newItem = {
+        id: `item-${Date.now()}`,
+        x: Math.random() * worldSize.width,
+        y: Math.random() * worldSize.height,
+        value: Math.floor(Math.random() * 5) + 1,
+        color: itemColors[Math.floor(Math.random() * itemColors.length)]
+      };
+      room.items.push(newItem);
+    }
+    io.to(roomId).emit('update_items', room.items);
+    break;
+  }
+}
+
     });
     io.to(roomId).emit('update_players', getPlayersForUpdate(room.players));
   });
