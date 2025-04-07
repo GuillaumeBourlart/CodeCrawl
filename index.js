@@ -43,6 +43,22 @@ function getPlayersForUpdate(players) {
   return result;
 }
 
+function dropQueueItems(player, roomId) {
+  player.queue.forEach(segment => {
+    const droppedItem = {
+      id: `dropped-${Date.now()}-${Math.random()}`,
+      x: segment.x,
+      y: segment.y,
+      value: 0,
+      color: player.color,
+      dropTime: Date.now()
+    };
+    roomsData[roomId].items.push(droppedItem);
+  });
+  io.to(roomId).emit('update_items', roomsData[roomId].items);
+}
+
+
 // Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
   const items = [];
@@ -257,39 +273,30 @@ socket.on('player_eliminated', (data) => {
   console.log(`Player ${socket.id} éliminé par ${data.eliminatedBy}`);
   const player = roomsData[roomId].players[socket.id];
   if (player) {
-    // Pour chaque segment de la queue, créer un item
-    player.queue.forEach(segment => {
-      const droppedItem = {
-        id: `dropped-${Date.now()}-${Math.random()}`,
-        x: segment.x,
-        y: segment.y,
-        value: 0,
-        color: player.color,
-        dropTime: Date.now() // Vous pouvez éventuellement utiliser dropTime pour une logique future
-      };
-      roomsData[roomId].items.push(droppedItem);
-    });
-    // Envoyer la mise à jour des items aux clients
-    io.to(roomId).emit('update_items', roomsData[roomId].items);
+    dropQueueItems(player, roomId);
   }
-  // Supprimer le joueur de la room
   delete roomsData[roomId].players[socket.id];
   io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
 });
 
 
+
     // Disconnect
-    socket.on('disconnect', async (reason) => {
-      console.log(`Déconnexion du socket ${socket.id}. Raison: ${reason}`);
-      if (roomsData[roomId]?.players[socket.id]) {
-        console.log(`Suppression du joueur ${socket.id} de la room ${roomId}`);
-        delete roomsData[roomId].players[socket.id];
-      }
-      await leaveRoom(roomId);
-      io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
-    });
-  })();
+
+socket.on('disconnect', async (reason) => {
+  console.log(`Déconnexion du socket ${socket.id}. Raison: ${reason}`);
+  if (roomsData[roomId]?.players[socket.id]) {
+    console.log(`Suppression du joueur ${socket.id} de la room ${roomId}`);
+    const player = roomsData[roomId].players[socket.id];
+    // Ici vous pouvez décider : souhaitez-vous dropper la queue à la déconnexion ?
+    // Si oui :
+    dropQueueItems(player, roomId);
+    delete roomsData[roomId].players[socket.id];
+  }
+  await leaveRoom(roomId);
+  io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
 });
+
 
 // Boucle de simulation (toutes les 10 ms)
 setInterval(() => {
@@ -352,12 +359,15 @@ setInterval(() => {
       }
 
       // Collision avec les parois
-      if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
-        console.log(`Le joueur ${id} a touché une paroi. Élimination.`);
-        io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
-        delete room.players[id];
-        return;
-      }
+     if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
+  console.log(`Le joueur ${id} a touché une paroi. Élimination.`);
+  io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
+  // Convertir la queue en items avant de supprimer le joueur
+  dropQueueItems(player, roomId);
+  delete room.players[id];
+  return;
+}
+
 
      // Collision avec les items
       // Collision avec les items
