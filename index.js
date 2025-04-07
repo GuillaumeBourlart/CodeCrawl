@@ -18,7 +18,7 @@ const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;
 const BASE_SIZE = 20; // Taille de base d'un cercle
 const MAX_ITEMS = 50; // Nombre maximum d'items autorisés
-const DELAY_MS = 50;  // Valeur de base pour le calcul du delay
+const DELAY_MS = 70;  // Valeur de base pour le calcul du delay
 
 // Vitesse
 const SPEED_NORMAL = 2;
@@ -222,7 +222,7 @@ io.on('connection', (socket) => {
           console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
           io.to(roomId).emit('update_items', roomsData[roomId].items);
           player.queue.pop();
-          player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
+          player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
           io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
         } else {
           clearInterval(player.boostInterval);
@@ -313,7 +313,7 @@ setInterval(() => {
       player.y += player.direction.y * speed;
 
       // Calcul du delay fixe : temps nécessaire pour parcourir la taille actuelle d'un cercle
-      const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.1);
+      const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.01);
       const fixedDelay = currentCircleSize / speed;
 
       // Mise à jour de la file basée sur l'historique
