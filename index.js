@@ -183,45 +183,34 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('update_items', roomsData[roomId].items);
 
     // Modification de changeDirection : on met à jour targetDirection puis on effectue une rotation en boucle
-   socket.on('changeDirection', (data) => {
-  const player = roomsData[roomId].players[socket.id];
-  if (!player) return;
-
-  // Calculer la direction cible à partir des données reçues
-  const { x, y } = data.direction;
-  const mag = Math.sqrt(x * x + y * y) || 1;
-  const targetDir = { x: x / mag, y: y / mag };
-
-  // Récupérer la direction actuelle du joueur
-  const currentDir = player.direction;
-  // Calculer le produit scalaire et l'angle entre la direction actuelle et la cible
-  const dot = currentDir.x * targetDir.x + currentDir.y * targetDir.y;
-  const clampedDot = Math.min(Math.max(dot, -1), 1);
-  const angleDiff = Math.acos(clampedDot);
-
-  const maxAngle = Math.PI / 6; // 30° en radians
-
-  if (angleDiff > maxAngle) {
-    // Déterminer le sens de rotation grâce au produit vectoriel
-    const cross = currentDir.x * targetDir.y - currentDir.y * targetDir.x;
-    const sign = cross >= 0 ? 1 : -1;
-
-    // Calculer la nouvelle direction en faisant tourner currentDir de maxAngle dans le sens approprié
-    const newDir = {
-      x: currentDir.x * Math.cos(maxAngle) - currentDir.y * Math.sin(maxAngle) * sign,
-      y: currentDir.x * Math.sin(maxAngle) * sign + currentDir.y * Math.cos(maxAngle)
-    };
-
-    // Normaliser la nouvelle direction
-    const newMag = Math.sqrt(newDir.x * newDir.x + newDir.y * newDir.y) || 1;
-    player.direction = { x: newDir.x / newMag, y: newDir.y / newMag };
-  } else {
-    // Si l'écart est inférieur ou égal à 30°, on aligne directement la direction
-    player.direction = targetDir;
-  }
-
-  console.log(`Nouvelle direction pour ${socket.id}:`, player.direction);
-});
+  // Changement de direction
+    socket.on('changeDirection', (data) => {
+      console.log(`changeDirection reçu de ${socket.id}:`, data);
+      const player = roomsData[roomId].players[socket.id];
+      if (!player) return;
+      const { x, y } = data.direction;
+      const mag = Math.sqrt(x * x + y * y) || 1;
+      let newDir = { x: x / mag, y: y / mag };
+      // Limiter le changement de direction
+      const currentDir = player.direction;
+      const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
+      const clampedDot = Math.min(Math.max(dot, -1), 1);
+      const angleDiff = Math.acos(clampedDot);
+      const maxAngle = Math.PI / 6;
+      if (angleDiff > maxAngle) {
+        const cross = currentDir.x * newDir.y - currentDir.y * newDir.x;
+        const sign = cross >= 0 ? 1 : -1;
+        function rotateVector(vec, angle) {
+          return {
+            x: vec.x * Math.cos(angle) - vec.y * Math.sin(angle),
+            y: vec.x * Math.sin(angle) + vec.y * Math.cos(angle)
+          };
+        }
+        newDir = rotateVector(currentDir, sign * maxAngle);
+      }
+      player.direction = newDir;
+      console.log(`Nouvelle direction pour ${socket.id}:`, newDir);
+    });
 
 
     // Boost start : retirer immédiatement un segment avant de démarrer l'intervalle
