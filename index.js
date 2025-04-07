@@ -237,44 +237,61 @@ io.on("connection", (socket) => {
       console.log(`Nouvelle direction pour ${socket.id}:`, newDir);
     });
 
-    // Boost start
     socket.on("boostStart", () => {
-      console.log(`boostStart déclenché par ${socket.id}`);
-      const player = roomsData[roomId].players[socket.id];
-      if (!player) return;
-      if (player.queue.length === 0) {
-        console.log(`boostStart impossible pour ${socket.id} car la queue est vide.`);
-        return;
-      }
-      if (player.boosting) return;
-      player.boosting = true;
-      player.boostInterval = setInterval(() => {
-        if (player.queue.length > 0) {
-          const droppedSegment = player.queue[player.queue.length - 1];
-          const droppedItem = {
-            id: `dropped-${Date.now()}`,
-            x: droppedSegment.x,
-            y: droppedSegment.y,
-            value: 0,
-            color: player.color,
-            owner: socket.id, // Propriétaire de l'item
-            dropTime: Date.now(), // Date de dépôt (en ms)
-          };
-          roomsData[roomId].items.push(droppedItem);
-          console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
-          io.to(roomId).emit("update_items", roomsData[roomId].items);
-          player.queue.pop();
-          player.length = BASE_SIZE * (1 + player.queue.length * 0.0005);
-          io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-        } else {
-          clearInterval(player.boostInterval);
-          player.boosting = false;
-          console.log(`Fin du boost pour ${socket.id} car la queue est vide.`);
-          io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-        }
-      }, 500);
+  console.log(`boostStart déclenché par ${socket.id}`);
+  const player = roomsData[roomId].players[socket.id];
+  if (!player) return;
+  if (player.queue.length === 0) {
+    console.log(`boostStart impossible pour ${socket.id} car la queue est vide.`);
+    return;
+  }
+  if (player.boosting) return;
+
+  // Retirer immédiatement un segment et le transformer en item
+  const droppedSegment = player.queue.pop();
+  const droppedItem = {
+    id: `dropped-${Date.now()}`,
+    x: droppedSegment.x,
+    y: droppedSegment.y,
+    value: 0,
+    color: player.color,
+    owner: socket.id,
+    dropTime: Date.now()
+  };
+  roomsData[roomId].items.push(droppedItem);
+  io.to(roomId).emit("update_items", roomsData[roomId].items);
+  player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
+  io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
+
+  player.boosting = true;
+  player.boostInterval = setInterval(() => {
+    if (player.queue.length > 0) {
+      const droppedSegment = player.queue[player.queue.length - 1];
+      const droppedItem = {
+        id: `dropped-${Date.now()}`,
+        x: droppedSegment.x,
+        y: droppedSegment.y,
+        value: 0,
+        color: player.color,
+        owner: socket.id,
+        dropTime: Date.now()
+      };
+      roomsData[roomId].items.push(droppedItem);
+      console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
+      io.to(roomId).emit("update_items", roomsData[roomId].items);
+      player.queue.pop();
+      player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-    });
+    } else {
+      clearInterval(player.boostInterval);
+      player.boosting = false;
+      console.log(`Fin du boost pour ${socket.id} car la queue est vide.`);
+      io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
+    }
+  }, 500);
+  io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
+});
+
 
     // Boost stop
     socket.on("boostStop", () => {
