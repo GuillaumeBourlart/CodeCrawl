@@ -97,7 +97,7 @@ function getDelayedPosition(positionHistory, delay) {
 // Retourne le nombre de segments attendus en fonction des items mangés
 function getExpectedSegments(itemEatenCount) {
   if (itemEatenCount < 5) return itemEatenCount;
-  return 5 + Math.floor((itemEatenCount - 5) / 10);
+  return 5 + Math.floor((itemEatenCount - 5) / 3);
 }
 
 // Rooms en mémoire
@@ -171,7 +171,7 @@ io.on("connection", (socket) => {
       };
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
-    // Initialiser le joueur avec une direction initiale
+    // Initialiser le joueur avec une direction initiale et cible identiques
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -216,7 +216,7 @@ io.on("connection", (socket) => {
       const { x, y } = data.direction;
       const mag = Math.sqrt(x * x + y * y) || 1;
       let newDir = { x: x / mag, y: y / mag };
-      // Limiter le changement de direction en tournant d'au maximum 15° (Math.PI/12)
+      // Limiter le changement de direction
       const currentDir = player.direction;
       const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
       const clampedDot = Math.min(Math.max(dot, -1), 1);
@@ -237,19 +237,36 @@ io.on("connection", (socket) => {
       console.log(`Nouvelle direction pour ${socket.id}:`, newDir);
     });
 
-    // Boost start
     socket.on("boostStart", () => {
-      console.log(`boostStart déclenché par ${socket.id}`);
-      const player = roomsData[roomId].players[socket.id];
-      if (!player) return;
-      if (player.queue.length === 0) {
-        console.log(`boostStart impossible pour ${socket.id} car la queue est vide.`);
-        return;
-      }
-      if (player.boosting) return;
+  console.log(`boostStart déclenché par ${socket.id}`);
+  const player = roomsData[roomId].players[socket.id];
+  if (!player) return;
+  if (player.queue.length === 0) {
+    console.log(`boostStart impossible pour ${socket.id} car la queue est vide.`);
+    return;
+  }
+  if (player.boosting) return;
 
-      // Retirer immédiatement un segment et le transformer en item
-      const droppedSegment = player.queue.pop();
+  // Retirer immédiatement un segment et le transformer en item
+  const droppedSegment = player.queue.pop();
+  const droppedItem = {
+    id: `dropped-${Date.now()}`,
+    x: droppedSegment.x,
+    y: droppedSegment.y,
+    value: 0,
+    color: player.color,
+    owner: socket.id,
+    dropTime: Date.now()
+  };
+  roomsData[roomId].items.push(droppedItem);
+  io.to(roomId).emit("update_items", roomsData[roomId].items);
+  player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
+  io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
+
+  player.boosting = true;
+  player.boostInterval = setInterval(() => {
+    if (player.queue.length > 0) {
+      const droppedSegment = player.queue[player.queue.length - 1];
       const droppedItem = {
         id: `dropped-${Date.now()}`,
         x: droppedSegment.x,
@@ -257,41 +274,24 @@ io.on("connection", (socket) => {
         value: 0,
         color: player.color,
         owner: socket.id,
-        dropTime: Date.now(),
+        dropTime: Date.now()
       };
       roomsData[roomId].items.push(droppedItem);
+      console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
       io.to(roomId).emit("update_items", roomsData[roomId].items);
+      player.queue.pop();
       player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-
-      player.boosting = true;
-      player.boostInterval = setInterval(() => {
-        if (player.queue.length > 0) {
-          const droppedSegment = player.queue[player.queue.length - 1];
-          const droppedItem = {
-            id: `dropped-${Date.now()}`,
-            x: droppedSegment.x,
-            y: droppedSegment.y,
-            value: 0,
-            color: player.color,
-            owner: socket.id,
-            dropTime: Date.now(),
-          };
-          roomsData[roomId].items.push(droppedItem);
-          console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
-          io.to(roomId).emit("update_items", roomsData[roomId].items);
-          player.queue.pop();
-          player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
-          io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-        } else {
-          clearInterval(player.boostInterval);
-          player.boosting = false;
-          console.log(`Fin du boost pour ${socket.id} car la queue est vide.`);
-          io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-        }
-      }, 500);
+    } else {
+      clearInterval(player.boostInterval);
+      player.boosting = false;
+      console.log(`Fin du boost pour ${socket.id} car la queue est vide.`);
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-    });
+    }
+  }, 500);
+  io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
+});
+
 
     // Boost stop
     socket.on("boostStop", () => {
@@ -332,7 +332,7 @@ io.on("connection", (socket) => {
   })();
 });
 
-// --- Boucle de simulation ---
+// Boucle de simulation (toutes les 10 ms)
 setInterval(() => {
   Object.keys(roomsData).forEach((roomId) => {
     const room = roomsData[roomId];
@@ -349,7 +349,7 @@ setInterval(() => {
         const dx = player1.x - player2.x;
         const dy = player1.y - player2.y;
         const distance = Math.hypot(dx, dy);
-        if (distance < BASE_SIZE) { // Si les têtes se touchent
+        if (distance < BASE_SIZE) {
           const dot =
             player1.direction.x * player2.direction.x +
             player1.direction.y * player2.direction.y;
@@ -374,7 +374,7 @@ setInterval(() => {
         player.positionHistory.shift();
       }
 
-      // Mise à jour progressive de la direction : rotation vers targetDirection (si définie)
+      // Mise à jour progressive de la direction : rotation vers targetDirection
       if (player.targetDirection) {
         const currentDir = player.direction;
         const targetDir = player.targetDirection;
@@ -421,12 +421,12 @@ setInterval(() => {
         }
       }
 
-      // Collision avec les parois en prenant en compte la hitbox entière de la tête (carré)
+      // Collision avec les parois
       if (
-        player.x - BASE_SIZE / 2 < 0 ||
-        player.x + BASE_SIZE / 2 > worldSize.width ||
-        player.y - BASE_SIZE / 2 < 0 ||
-        player.y + BASE_SIZE / 2 > worldSize.height
+        player.x < 0 ||
+        player.x > worldSize.width ||
+        player.y < 0 ||
+        player.y > worldSize.height
       ) {
         console.log(`Le joueur ${id} a touché une paroi. Élimination.`);
         io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
@@ -435,7 +435,7 @@ setInterval(() => {
         return;
       }
 
-      // Collision avec les items : utiliser la détection basée sur la hitbox rectangulaire de la tête et le cercle de l'item
+      // Collision avec les items
       const haloMargin = BASE_SIZE * 0.1;
       const playerRadius = BASE_SIZE / 2;
       for (let i = 0; i < room.items.length; i++) {
