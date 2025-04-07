@@ -195,13 +195,15 @@ io.on('connection', (socket) => {
       console.log(`Nouvelle direction pour ${socket.id}:`, newDir);
     });
 
-    // Boost start
+    
+
+     // Boost start
     socket.on('boostStart', () => {
       console.log(`boostStart déclenché par ${socket.id}`);
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
       if (player.queue.length === 0) {
-        console.log(`boostStart impossible pour ${socket.id} car la file est vide.`);
+        console.log(`boostStart impossible pour ${socket.id} car la queue est vide.`);
         return;
       }
       if (player.boosting) return;
@@ -217,14 +219,15 @@ io.on('connection', (socket) => {
             color: player.color
           };
           roomsData[roomId].items.push(droppedItem);
-          console.log(`Segment retiré de ${socket.id} transformé en item:`, droppedItem);
+          console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
           io.to(roomId).emit('update_items', roomsData[roomId].items);
           player.queue.pop();
+          player.length = BASE_SIZE * (1 + player.queue.length * 0.1);
           io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
         } else {
           clearInterval(player.boostInterval);
           player.boosting = false;
-          console.log(`Fin du boost pour ${socket.id} car la file est vide.`);
+          console.log(`Fin du boost pour ${socket.id} car la queue est vide.`);
           io.to(roomId).emit('update_players', getPlayersForUpdate(roomsData[roomId].players));
         }
       }, 500);
