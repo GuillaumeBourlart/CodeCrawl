@@ -71,10 +71,9 @@ function getDelayedPosition(positionHistory, delay) {
 }
 
 // Retourne le nombre de segments attendus en fonction des items mangés
+
 function getExpectedSegments(itemEatenCount) {
-  // Les 5 premiers items donnent les 5 segments de base.
-  if (itemEatenCount <= 5) return 5;
-  // Au-delà, chaque tranche de 10 items ajoute 1 segment.
+  if (itemEatenCount < 5) return itemEatenCount;
   return 5 + Math.floor((itemEatenCount - 5) / 10);
 }
 
