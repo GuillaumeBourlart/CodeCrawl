@@ -97,7 +97,7 @@ function getDelayedPosition(positionHistory, delay) {
 // Retourne le nombre de segments attendus en fonction des items mangés
 function getExpectedSegments(itemEatenCount) {
   if (itemEatenCount < 5) return itemEatenCount;
-  return 5 + Math.floor((itemEatenCount - 5) / 10);
+  return 5 + Math.floor((itemEatenCount - 5) / 3);
 }
 
 // Rooms en mémoire
@@ -221,7 +221,7 @@ io.on("connection", (socket) => {
       const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
       const clampedDot = Math.min(Math.max(dot, -1), 1);
       const angleDiff = Math.acos(clampedDot);
-      const maxAngle = Math.PI / 6;
+      const maxAngle = Math.PI / 12;
       if (angleDiff > maxAngle) {
         const cross = currentDir.x * newDir.y - currentDir.y * newDir.x;
         const sign = cross >= 0 ? 1 : -1;
@@ -264,7 +264,7 @@ io.on("connection", (socket) => {
           console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
           io.to(roomId).emit("update_items", roomsData[roomId].items);
           player.queue.pop();
-          player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
+          player.length = BASE_SIZE * (1 + player.queue.length * 0.0005);
           io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
         } else {
           clearInterval(player.boostInterval);
@@ -390,7 +390,7 @@ setInterval(() => {
       player.y += player.direction.y * speed;
 
       // Calcul du delay fixe : temps nécessaire pour parcourir la taille actuelle d'un cercle
-      const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.5);
+      const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.8);
       const fixedDelay = currentCircleSize / speed;
 
       // Mise à jour de la file basée sur l'historique
