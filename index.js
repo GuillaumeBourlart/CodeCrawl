@@ -18,7 +18,7 @@ const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;
 const BASE_SIZE = 20; // Taille de base d'un cercle
 const MAX_ITEMS = 50; // Nombre maximum d'items autorisés
-const DELAY_MS = 70;  // Valeur de base pour le calcul du delay
+const DELAY_MS = 50;  // Valeur de base pour le calcul du delay
 
 // Vitesse
 const SPEED_NORMAL = 2;
