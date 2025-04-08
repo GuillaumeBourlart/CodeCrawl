@@ -523,7 +523,6 @@ if (
 
 
       // Collision entre le joueur et les items (basée sur la tête)
-      const headCircle = { x: player.x, y: player.y, radius: getHeadRadius(player) };
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
         const itemCircle = { x: item.x, y: item.y, radius: item.radius };
