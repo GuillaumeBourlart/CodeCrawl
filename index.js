@@ -91,27 +91,24 @@ function getPlayersForUpdate(players) {
 
 // Fonction dropQueueItems : on ne droppe pas pour chaque segment, mais par tranche
 function dropQueueItems(player, roomId) {
-  // Par exemple, on droppe un item pour tous les 3 segments (minimum 1)
-  const dropCount = Math.max(1, Math.floor(player.queue.length / 3));
-  for (let i = 0; i < dropCount; i++) {
-    // On retire le segment le plus ancien dans la queue (ou le dernier ? ici on utilise pop)
-    const droppedSegment = player.queue.pop();
-    const droppedItem = {
-      id: `dropped-${Date.now()}-${Math.random()}`,
-      x: droppedSegment.x,
-      y: droppedSegment.y,
-      // Ici, la "valeur" de l'item est égale à son rayon,
-      // ce qui signifie qu'un item avec un rayon de 6 va compter comme 6 items consommés.
-      value: randomItemRadius(), // Vous pouvez aussi attribuer droppedSegment.value s'il est défini
-      color: player.color,
-      radius: randomItemRadius(),
-      dropTime: Date.now(),
-      owner: socket.id, // Si nécessaire, ou omettre pour des items au sol
-    };
-    roomsData[roomId].items.push(droppedItem);
-  }
+  player.queue.forEach((segment, index) => {
+    // Drop uniquement si index est divisible par 3 (donc 0, 3, 6, …)
+    if (index % 3 === 0) {
+      const droppedItem = {
+        id: `dropped-${Date.now()}-${Math.random()}`,
+        x: segment.x,
+        y: segment.y,
+        value: 0,
+        color: player.color,
+        radius: randomItemRadius(),
+        dropTime: Date.now(),
+      };
+      roomsData[roomId].items.push(droppedItem);
+    }
+  });
   io.to(roomId).emit("update_items", roomsData[roomId].items);
 }
+
 
 // Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
