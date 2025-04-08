@@ -464,7 +464,7 @@ setInterval(() => {
       
       // Enregistrer la position actuelle dans l'historique
       player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
-      if (player.positionHistory.length > 500) {
+      if (player.positionHistory.length > 100000) {
         player.positionHistory.shift();
       }
       
