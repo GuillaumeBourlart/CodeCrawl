@@ -46,10 +46,13 @@ function getHeadRadius(player) {
   return BASE_SIZE / 2 + player.itemEatenCount * 0.5;
 }
 
-function getSegmentRadius(player) {
-  // Les segments peuvent avoir le même rayon que la tête ou une valeur fixe
-  return BASE_SIZE / 2;
-}
+const getSegmentRadius = (player: Player): number => {
+  // Si vous voulez que les segments grossissent de la même façon que la tête :
+  return getHeadRadius(player);
+  // ou une légère variation, par exemple :
+  // return BASE_SIZE / 2 + (player.itemEatenCount || 0) * 0.3;
+};
+
 
 // Retourne la liste des cercles constituant un joueur (tête + chaque segment de la queue)
 function getPlayerCircles(player) {
