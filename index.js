@@ -42,28 +42,26 @@ function randomItemRadius() {
 
 // Pour la hitbox du joueur, on définit la taille de la tête et des segments
 function getHeadRadius(player) {
-  // Exemple : la tête a un rayon de BASE_SIZE/2, éventuellement ajusté par le nombre de segments
+  // La tête grossit en fonction du nombre d'items mangés (donc de segments dans la queue)
   return BASE_SIZE / 2 + player.itemEatenCount * 0.5;
 }
 
-const getSegmentRadius = (player: Player): number => {
-  // Si vous voulez que les segments grossissent de la même façon que la tête :
-  return getHeadRadius(player);
-  // ou une légère variation, par exemple :
-  // return BASE_SIZE / 2 + (player.itemEatenCount || 0) * 0.3;
-};
-
+function getSegmentRadius(player) {
+  // Vous pouvez faire grossir les segments de la même manière que la tête,
+  // ou choisir une augmentation moindre.
+  return BASE_SIZE / 2 + player.itemEatenCount * 0.3;
+}
 
 // Retourne la liste des cercles constituant un joueur (tête + chaque segment de la queue)
 function getPlayerCircles(player) {
   const circles = [];
-  // Ajoute la tête
+  // Ajoute la tête (index 0)
   circles.push({
     x: player.x,
     y: player.y,
     radius: getHeadRadius(player),
   });
-  // Ajoute chaque segment de la queue, en appliquant le même rayon
+  // Ajoute chaque segment de la queue (indices 1+)
   player.queue.forEach((segment) => {
     circles.push({
       x: segment.x,
@@ -125,7 +123,7 @@ function generateRandomItems(count, worldSize) {
   return items;
 }
 
-// (Ancienne) fonction basée sur le délai en ms – non utilisée avec le nouveau système
+// Ancienne fonction (basée sur un délai en ms) – non utilisée avec le nouveau système
 function getDelayedPosition(positionHistory, delay) {
   const targetTime = Date.now() - delay;
   if (!positionHistory || positionHistory.length === 0) return null;
@@ -156,7 +154,7 @@ function getPositionAtDistance(positionHistory, targetDistance) {
   return { x: positionHistory[0].x, y: positionHistory[0].y };
 }
 
-// Ici, le nombre d'items mangés sera strictement égal au nombre de segments dans la queue.
+// Ici, le nombre d'items mangés doit être exactement égal au nombre de segments dans la queue.
 function updateItemsEaten(player) {
   player.itemEatenCount = player.queue.length;
 }
@@ -263,7 +261,7 @@ io.on("connection", (socket) => {
       direction: defaultDirection,
       boosting: false,
       color: randomColor,
-      itemEatenCount: 0, // initialement, queue vide, donc 0
+      itemEatenCount: 0,
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
 
@@ -326,7 +324,6 @@ io.on("connection", (socket) => {
       roomsData[roomId].items.push(droppedItem);
       io.to(roomId).emit("update_items", roomsData[roomId].items);
       player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
-      // Consommer le cercle, donc mettre à jour le compteur pour qu'il corresponde exactement à la queue.
       updateItemsEaten(player);
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
 
@@ -373,7 +370,6 @@ io.on("connection", (socket) => {
       }
     });
 
-    // Player eliminated event (côté client)
     socket.on("player_eliminated", (data) => {
       console.log(`Player ${socket.id} éliminé par ${data.eliminatedBy}`);
       const player = roomsData[roomId].players[socket.id];
@@ -384,7 +380,6 @@ io.on("connection", (socket) => {
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
     });
 
-    // Disconnect
     socket.on("disconnect", async (reason) => {
       console.log(`Déconnexion du socket ${socket.id}. Raison: ${reason}`);
       if (roomsData[roomId]?.players[socket.id]) {
@@ -403,9 +398,12 @@ io.on("connection", (socket) => {
 setInterval(() => {
   Object.keys(roomsData).forEach((roomId) => {
     const room = roomsData[roomId];
-
-    // Collision frontale entre joueurs (vérification complète avec têtes et queues)
     const playerIds = Object.keys(room.players);
+
+    // Collision entre paires de joueurs
+    // Pour chaque paire, d'abord vérifier head vs head, puis head vs queue
+    const playersToEliminate = new Set();
+
     for (let i = 0; i < playerIds.length; i++) {
       for (let j = i + 1; j < playerIds.length; j++) {
         const id1 = playerIds[i];
@@ -414,48 +412,64 @@ setInterval(() => {
         const player2 = room.players[id2];
         if (!player1 || !player2) continue;
 
-        // Récupère l'ensemble des cercles de chaque joueur
-        const circles1 = getPlayerCircles(player1);
-        const circles2 = getPlayerCircles(player2);
+        // Récupère les cercles des têtes uniquement
+        const head1 = { x: player1.x, y: player1.y, radius: getHeadRadius(player1) };
+        const head2 = { x: player2.x, y: player2.y, radius: getHeadRadius(player2) };
 
-        // Si un des cercles de player1 entre en collision avec l'un de player2, collision
-        let collisionDetected = false;
-        for (const c1 of circles1) {
-          for (const c2 of circles2) {
-            if (circlesCollide(c1, c2)) {
-              collisionDetected = true;
-              break;
-            }
-          }
-          if (collisionDetected) break;
+        // 1. Vérification tête vs tête
+        if (circlesCollide(head1, head2)) {
+          // Si collision tête à tête, éliminer les deux
+          playersToEliminate.add(id1);
+          playersToEliminate.add(id2);
+          continue; // Passe à la prochaine paire
         }
-        if (collisionDetected) {
-          console.log(`Collision complète détectée entre ${id1} et ${id2}. Élimination mutuelle.`);
-          io.to(id1).emit("player_eliminated", { eliminatedBy: "collision complète" });
-          io.to(id2).emit("player_eliminated", { eliminatedBy: "collision complète" });
-          delete room.players[id1];
-          delete room.players[id2];
+
+        // 2. Vérification : la tête de player1 avec les segments de la queue de player2
+        for (const segment of player2.queue) {
+          const segmentCircle = { x: segment.x, y: segment.y, radius: getSegmentRadius(player2) };
+          if (circlesCollide(head1, segmentCircle)) {
+            // Alors player1 est éliminé
+            playersToEliminate.add(id1);
+            break;
+          }
+        }
+        // 3. Vérification : la tête de player2 avec les segments de la queue de player1
+        for (const segment of player1.queue) {
+          const segmentCircle = { x: segment.x, y: segment.y, radius: getSegmentRadius(player1) };
+          if (circlesCollide(head2, segmentCircle)) {
+            // Alors player2 est éliminé
+            playersToEliminate.add(id2);
+            break;
+          }
         }
       }
     }
+    // Élimine les joueurs marqués
+    playersToEliminate.forEach(id => {
+      io.to(id).emit("player_eliminated", { eliminatedBy: "collision" });
+      if (room.players[id]) {
+        dropQueueItems(room.players[id], roomId);
+        delete room.players[id];
+      }
+    });
 
     // Mise à jour de chaque joueur
     Object.entries(room.players).forEach(([id, player]) => {
       if (!player.direction) return;
-
+      
       // Enregistrer la position actuelle dans l'historique
       player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
       if (player.positionHistory.length > 10000) {
         player.positionHistory.shift();
       }
-
-      // Mise à jour progressive de la direction : rotation vers targetDirection
+      
+      // Rotation progressive vers targetDirection
       if (player.targetDirection) {
         const currentDir = player.direction;
         const targetDir = player.targetDirection;
         const dot = currentDir.x * targetDir.x + currentDir.y * targetDir.y;
         const angleDiff = Math.acos(Math.min(Math.max(dot, -1), 1));
-        const stepAngle = Math.PI / 6; // 30° par tick
+        const stepAngle = Math.PI / 6;
         if (angleDiff > 0.001) {
           while (angleDiff >= stepAngle) {
             const cross = currentDir.x * targetDir.y - currentDir.y * targetDir.x;
@@ -475,14 +489,14 @@ setInterval(() => {
           }
         }
       }
-
+      
       // Mise à jour de la position de la tête
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
-
-      // === Mise à jour de la queue avec espacement constant basé sur la distance ===
-      const tailSpacing = BASE_SIZE; // Espacement constant en pixels entre segments
+      
+      // Mise à jour de la queue basée sur la distance
+      const tailSpacing = BASE_SIZE; // Espacement constant
       for (let i = 0; i < player.queue.length; i++) {
         const targetDistance = (i + 1) * tailSpacing;
         const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
@@ -492,8 +506,8 @@ setInterval(() => {
           player.queue[i] = { x: player.x, y: player.y };
         }
       }
-
-      // Vérification de collision avec les bords pour chaque cercle (tête + queue)
+      
+      // Vérification de collision avec les bords pour chaque cercle du joueur
       const circles = getPlayerCircles(player);
       for (const c of circles) {
         if (
@@ -509,18 +523,17 @@ setInterval(() => {
           return;
         }
       }
-
-      // Collision avec les items (vérification sur la totalité des cercles de la tête)
-      const playerHeadCircle = { x: player.x, y: player.y, radius: getHeadRadius(player) };
+      
+      // Collision avec les items en se basant sur la tête
+      const headCircle = { x: player.x, y: player.y, radius: getHeadRadius(player) };
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
         const itemCircle = { x: item.x, y: item.y, radius: item.radius };
         if (item.owner && item.owner === id) {
           if (Date.now() - item.dropTime < 10000) continue;
         }
-        if (circlesCollide(playerHeadCircle, itemCircle)) {
-          // On consomme l'item en ajoutant EXACTEMENT un segment à la queue
-          // La queue passe de longueur N à N+1 et l'itemEatenCount devient N+1
+        if (circlesCollide(headCircle, itemCircle)) {
+          // La consommation donne exactement un segment de queue de plus
           if (player.queue.length === 0) {
             player.queue.push({ x: player.x, y: player.y });
           } else {
