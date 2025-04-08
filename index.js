@@ -49,7 +49,7 @@ function getHeadRadius(player) {
 function getSegmentRadius(player) {
   // Vous pouvez faire grossir les segments de la même manière que la tête,
   // ou choisir une augmentation moindre.
-  return BASE_SIZE / 2 + player.itemEatenCount * 0.3;
+  return BASE_SIZE / 2 + player.itemEatenCount * 0.5;
 }
 
 // Retourne la liste des cercles constituant un joueur (tête + chaque segment de la queue)
