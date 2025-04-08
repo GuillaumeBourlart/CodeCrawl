@@ -47,8 +47,7 @@ function getHeadRadius(player) {
 }
 
 function getSegmentRadius(player) {
-  // Vous pouvez faire grossir les segments de la même manière que la tête,
-  // ou choisir une augmentation moindre.
+  // Ici, on choisit de faire grossir les segments de la même manière que la tête
   return BASE_SIZE / 2 + player.itemEatenCount * 0.05;
 }
 
@@ -90,20 +89,27 @@ function getPlayersForUpdate(players) {
   return result;
 }
 
-// Convertit la queue d'un joueur en items et met à jour les clients
+// Fonction dropQueueItems : on ne droppe pas pour chaque segment, mais par tranche
 function dropQueueItems(player, roomId) {
-  player.queue.forEach((segment) => {
+  // Par exemple, on droppe un item pour tous les 3 segments (minimum 1)
+  const dropCount = Math.max(1, Math.floor(player.queue.length / 3));
+  for (let i = 0; i < dropCount; i++) {
+    // On retire le segment le plus ancien dans la queue (ou le dernier ? ici on utilise pop)
+    const droppedSegment = player.queue.pop();
     const droppedItem = {
       id: `dropped-${Date.now()}-${Math.random()}`,
-      x: segment.x,
-      y: segment.y,
-      value: 0,
+      x: droppedSegment.x,
+      y: droppedSegment.y,
+      // Ici, la "valeur" de l'item est égale à son rayon,
+      // ce qui signifie qu'un item avec un rayon de 6 va compter comme 6 items consommés.
+      value: randomItemRadius(), // Vous pouvez aussi attribuer droppedSegment.value s'il est défini
       color: player.color,
       radius: randomItemRadius(),
       dropTime: Date.now(),
+      owner: socket.id, // Si nécessaire, ou omettre pour des items au sol
     };
     roomsData[roomId].items.push(droppedItem);
-  });
+  }
   io.to(roomId).emit("update_items", roomsData[roomId].items);
 }
 
@@ -154,7 +160,7 @@ function getPositionAtDistance(positionHistory, targetDistance) {
   return { x: positionHistory[0].x, y: positionHistory[0].y };
 }
 
-// Ici, le nombre d'items mangés doit être exactement égal au nombre de segments dans la queue.
+// Met à jour le nombre d'items mangés pour qu'il corresponde à la longueur de la queue
 function updateItemsEaten(player) {
   player.itemEatenCount = player.queue.length;
 }
@@ -315,7 +321,7 @@ io.on("connection", (socket) => {
         id: `dropped-${Date.now()}`,
         x: droppedSegment.x,
         y: droppedSegment.y,
-        value: 0,
+        value: randomItemRadius(), // La valeur représente le nombre d'items consommés
         color: player.color,
         owner: socket.id,
         radius: randomItemRadius(),
@@ -335,7 +341,7 @@ io.on("connection", (socket) => {
             id: `dropped-${Date.now()}`,
             x: droppedSegment.x,
             y: droppedSegment.y,
-            value: 0,
+            value: randomItemRadius(),
             color: player.color,
             owner: socket.id,
             radius: randomItemRadius(),
@@ -400,8 +406,9 @@ setInterval(() => {
     const room = roomsData[roomId];
     const playerIds = Object.keys(room.players);
 
-    // Collision entre paires de joueurs
-    // Pour chaque paire, d'abord vérifier head vs head, puis head vs queue
+    // Collision entre paires de joueurs :
+    // 1. Vérification Head vs Head → si collision, les deux sont éliminés.
+    // 2. Vérification Head vs Queue → si la tête d'un joueur touche la queue d'un autre, seul le joueur dont la tête touche la queue est éliminé.
     const playersToEliminate = new Set();
 
     for (let i = 0; i < playerIds.length; i++) {
@@ -412,39 +419,35 @@ setInterval(() => {
         const player2 = room.players[id2];
         if (!player1 || !player2) continue;
 
-        // Récupère les cercles des têtes uniquement
+        // Calcul des cercles de tête
         const head1 = { x: player1.x, y: player1.y, radius: getHeadRadius(player1) };
         const head2 = { x: player2.x, y: player2.y, radius: getHeadRadius(player2) };
 
-        // 1. Vérification tête vs tête
+        // 1. Head vs Head
         if (circlesCollide(head1, head2)) {
-          // Si collision tête à tête, éliminer les deux
           playersToEliminate.add(id1);
           playersToEliminate.add(id2);
-          continue; // Passe à la prochaine paire
+          continue;
         }
 
-        // 2. Vérification : la tête de player1 avec les segments de la queue de player2
+        // 2. Head de player1 vs Queue de player2
         for (const segment of player2.queue) {
           const segmentCircle = { x: segment.x, y: segment.y, radius: getSegmentRadius(player2) };
           if (circlesCollide(head1, segmentCircle)) {
-            // Alors player1 est éliminé
             playersToEliminate.add(id1);
             break;
           }
         }
-        // 3. Vérification : la tête de player2 avec les segments de la queue de player1
+        // 3. Head de player2 vs Queue de player1
         for (const segment of player1.queue) {
           const segmentCircle = { x: segment.x, y: segment.y, radius: getSegmentRadius(player1) };
           if (circlesCollide(head2, segmentCircle)) {
-            // Alors player2 est éliminé
             playersToEliminate.add(id2);
             break;
           }
         }
       }
     }
-    // Élimine les joueurs marqués
     playersToEliminate.forEach(id => {
       io.to(id).emit("player_eliminated", { eliminatedBy: "collision" });
       if (room.players[id]) {
@@ -496,7 +499,8 @@ setInterval(() => {
       player.y += player.direction.y * speed;
       
       // Mise à jour de la queue basée sur la distance
-      const tailSpacing = getHeadRadius(player) * 0.4; // Espacement constant
+      // Ici, l'espacement est défini dynamiquement en fonction de la taille de la tête
+      const tailSpacing = getHeadRadius(player) * 0.4; 
       for (let i = 0; i < player.queue.length; i++) {
         const targetDistance = (i + 1) * tailSpacing;
         const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
@@ -525,7 +529,8 @@ setInterval(() => {
       }
       
       // Collision avec les items en se basant sur la tête
-      const headCircle = { x: player.x, y: player.y, radius: getHeadRadius(player) };
+      // On agrandit légèrement la hitbox de la tête pour améliorer la capture
+      const headCircle = { x: player.x, y: player.y, radius: getHeadRadius(player) * 1.05 };
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
         const itemCircle = { x: item.x, y: item.y, radius: item.radius };
@@ -533,12 +538,15 @@ setInterval(() => {
           if (Date.now() - item.dropTime < 10000) continue;
         }
         if (circlesCollide(headCircle, itemCircle)) {
-          // La consommation donne exactement un segment de queue de plus
-          if (player.queue.length === 0) {
-            player.queue.push({ x: player.x, y: player.y });
-          } else {
-            const lastSeg = player.queue[player.queue.length - 1];
-            player.queue.push({ x: lastSeg.x, y: lastSeg.y });
+          // Ajoute autant de segments que la valeur de l'item
+          const segmentsToAdd = item.value; // Par exemple, un item "de taille 6" ajoute 6 segments
+          for (let j = 0; j < segmentsToAdd; j++) {
+            if (player.queue.length === 0) {
+              player.queue.push({ x: player.x, y: player.y });
+            } else {
+              const lastSeg = player.queue[player.queue.length - 1];
+              player.queue.push({ x: lastSeg.x, y: lastSeg.y });
+            }
           }
           updateItemsEaten(player);
           room.items.splice(i, 1);
