@@ -226,12 +226,13 @@ io.on("connection", (socket) => {
       x: Math.random() * 800,
       y: Math.random() * 600,
       length: BASE_SIZE,
-      queue: [],
       positionHistory: [],
       direction: defaultDirection,
       boosting: false,
       color: randomColor,
-      itemEatenCount: 0 // compteur de "points" de croissance
+      itemEatenCount: 50,
+      queue: Array(5).fill({ x: initialX, y: initialY })
+
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
     socket.join(roomId);
@@ -309,9 +310,13 @@ io.on("connection", (socket) => {
           console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
           io.to(roomId).emit("update_items", roomsData[roomId].items);
           player.queue.pop();
-         if (player.itemEatenCount > 0) {
-  player.itemEatenCount = Math.max(0, player.itemEatenCount - 10);
+         if (player.itemEatenCount > 50) {
+  player.itemEatenCount = Math.max(50, player.itemEatenCount - 10);
+} else {
+  clearInterval(player.boostInterval);
+  player.boosting = false;
 }
+
 
           io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
         } else {
@@ -460,7 +465,7 @@ setInterval(() => {
           // et on calcule le nombre de segments désiré.
           const oldQueueLength = player.queue.length;
           player.itemEatenCount += item.value;
-          const targetQueueLength = Math.floor(player.itemEatenCount / 5);
+          const targetQueueLength = Math.floor(player.itemEatenCount / 10);
           const segmentsToAdd = targetQueueLength - oldQueueLength;
           for (let j = 0; j < segmentsToAdd; j++) {
             if (player.queue.length === 0) {
