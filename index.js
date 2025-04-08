@@ -540,14 +540,13 @@ setInterval(() => {
         if (circlesCollide(headCircle, itemCircle)) {
           // La consommation donne exactement un segment de queue de plus
          
-          for (let j = 0; j < item.value; j++) {
-  if (player.queue.length === 0) {
-    player.queue.push({ x: player.x, y: player.y });
-  } else {
-    const lastSeg = player.queue[player.queue.length - 1];
-    player.queue.push({ x: lastSeg.x, y: lastSeg.y });
-  }
+         if (player.queue.length === 0) {
+  player.queue.push({ x: player.x, y: player.y });
+} else {
+  const lastSeg = player.queue[player.queue.length - 1];
+  player.queue.push({ x: lastSeg.x, y: lastSeg.y });
 }
+
 
           updateItemsEaten(player);
           room.items.splice(i, 1);
