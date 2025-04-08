@@ -32,8 +32,8 @@ const BASE_SIZE = 20; // Taille de base d'un cercle (pour le joueur)
 const MAX_ITEMS = 50;
 
 // Vitesse
-const SPEED_NORMAL = 0.5;
-const SPEED_BOOST = 1;
+const SPEED_NORMAL = 1;
+const SPEED_BOOST = 1.5;
 
 // Fonction utilitaire: renvoie un rayon aléatoire entre MIN_ITEM_RADIUS et MAX_ITEM_RADIUS
 function randomItemRadius() {
