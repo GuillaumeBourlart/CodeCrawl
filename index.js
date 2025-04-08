@@ -222,9 +222,12 @@ io.on("connection", (socket) => {
       "#00FFFF", "#8B5CF6", "#D946EF", "#F97316", "#0EA5E9"
     ];
     const randomColor = playerColors[Math.floor(Math.random() * playerColors.length)];
+    const initialX = Math.random() * 800;
+    const initialY = Math.random() * 600;
+
     roomsData[roomId].players[socket.id] = {
-      x: Math.random() * 800,
-      y: Math.random() * 600,
+      x: initialX,
+      y: initialY,
       length: BASE_SIZE,
       positionHistory: [],
       direction: defaultDirection,
