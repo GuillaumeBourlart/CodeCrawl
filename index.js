@@ -43,12 +43,12 @@ function randomItemRadius() {
 // Pour la hitbox du joueur, on définit la taille de la tête et des segments
 function getHeadRadius(player) {
   // La tête grossit en fonction du nombre d'items mangés (donc de segments dans la queue)
-  return BASE_SIZE / 2 + player.itemEatenCount * 0.05;
+  return BASE_SIZE / 2 + player.itemEatenCount * 0.01;
 }
 
 function getSegmentRadius(player) {
   // Ici, on choisit de faire grossir les segments de la même manière que la tête
-  return BASE_SIZE / 2 + player.itemEatenCount * 0.05;
+  return BASE_SIZE / 2 + player.itemEatenCount * 0.01;
 }
 
 // Retourne la liste des cercles constituant un joueur (tête + chaque segment de la queue)
