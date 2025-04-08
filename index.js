@@ -43,12 +43,12 @@ function randomItemRadius() {
 // Pour la hitbox du joueur, on définit la taille de la tête et des segments
 function getHeadRadius(player) {
   // La tête grossit en fonction du nombre d'items mangés (donc de segments dans la queue)
-  return BASE_SIZE / 2 + player.itemEatenCount * 0.01;
+  return BASE_SIZE / 2 + player.itemEatenCount * 0.05;
 }
 
 function getSegmentRadius(player) {
   // Ici, on choisit de faire grossir les segments de la même manière que la tête
-  return BASE_SIZE / 2 + player.itemEatenCount * 0.01;
+  return BASE_SIZE / 2 + player.itemEatenCount * 0.05;
 }
 
 // Retourne la liste des cercles constituant un joueur (tête + chaque segment de la queue)
@@ -91,27 +91,32 @@ function getPlayersForUpdate(players) {
 
 // Fonction dropQueueItems : on ne droppe pas pour chaque segment, mais par tranche
 function dropQueueItems(player, roomId) {
-  // Par exemple, on droppe un item pour tous les 3 segments (minimum 1)
+  // Si la queue est vide, il n'y a rien à dropper
+  if (!player.queue || player.queue.length === 0) return;
+
+  // On droppe 1 item pour 3 segments (minimum 1)
   const dropCount = Math.max(1, Math.floor(player.queue.length / 3));
   for (let i = 0; i < dropCount; i++) {
-    // On retire le segment le plus ancien dans la queue (ou le dernier ? ici on utilise pop)
+    // On vérifie que la queue n'est pas vide
+    if (player.queue.length === 0) break;
     const droppedSegment = player.queue.pop();
+    if (!droppedSegment) break;
     const droppedItem = {
       id: `dropped-${Date.now()}-${Math.random()}`,
       x: droppedSegment.x,
       y: droppedSegment.y,
-      // Ici, la "valeur" de l'item est égale à son rayon,
-      // ce qui signifie qu'un item avec un rayon de 6 va compter comme 6 items consommés.
-      value: randomItemRadius(), // Vous pouvez aussi attribuer droppedSegment.value s'il est défini
+      // Ici, on peut utiliser la "valeur" pour compter la taille – comme défini par randomItemRadius()
+      value: randomItemRadius(), 
       color: player.color,
       radius: randomItemRadius(),
       dropTime: Date.now(),
-      owner: socket.id, // Si nécessaire, ou omettre pour des items au sol
+      // Vous pouvez supprimer owner si vous ne l'utilisez pas dans la détection d'items au sol
     };
     roomsData[roomId].items.push(droppedItem);
   }
   io.to(roomId).emit("update_items", roomsData[roomId].items);
 }
+
 
 // Génère des items aléatoires pour une room
 function generateRandomItems(count, worldSize) {
