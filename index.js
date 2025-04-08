@@ -496,7 +496,7 @@ setInterval(() => {
       player.y += player.direction.y * speed;
       
       // Mise à jour de la queue basée sur la distance
-      const tailSpacing = BASE_SIZE; // Espacement constant
+      const tailSpacing = getHeadRadius(player) * 0.2; // Espacement constant
       for (let i = 0; i < player.queue.length; i++) {
         const targetDistance = (i + 1) * tailSpacing;
         const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
