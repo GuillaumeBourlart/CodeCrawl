@@ -319,10 +319,10 @@ io.on("connection", (socket) => {
         id: `dropped-${Date.now()}`,
         x: droppedSegment.x,
         y: droppedSegment.y,
-        value: 0,
+        value: 1,
         color: player.color,
         owner: socket.id,
-        radius: randomItemRadius(),
+        radius: MIN_ITEM_RADIUS,
         dropTime: Date.now(),
       };
       roomsData[roomId].items.push(droppedItem);
@@ -339,10 +339,10 @@ io.on("connection", (socket) => {
             id: `dropped-${Date.now()}`,
             x: droppedSegment.x,
             y: droppedSegment.y,
-            value: 0,
+            value: 1,
             color: player.color,
             owner: socket.id,
-            radius: randomItemRadius(),
+            radius: MIN_ITEM_RADIUS,
             dropTime: Date.now(),
           };
           roomsData[roomId].items.push(droppedItem);
@@ -500,7 +500,7 @@ setInterval(() => {
       player.y += player.direction.y * speed;
       
       // Mise à jour de la queue basée sur la distance
-      const tailSpacing = BASE_SIZE; // Espacement constant
+      const tailSpacing = getHeadRadius(player) * 0.4;  // Espacement constant
       for (let i = 0; i < player.queue.length; i++) {
         const targetDistance = (i + 1) * tailSpacing;
         const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
