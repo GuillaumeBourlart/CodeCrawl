@@ -401,25 +401,24 @@ setInterval(() => {
         }
       }
 
-      // Mise à jour de la position de la tête
-      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-      player.x += player.direction.x * speed;
-      player.y += player.direction.y * speed;
+      
 
       // Calcul du delay fixe : temps nécessaire pour parcourir la taille actuelle d'un cercle
-      const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.8);
-      const fixedDelay = currentCircleSize / speed;
+const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.8);
+// Utilise la vitesse normale constant pour fixer l'espacement entre segments
+const fixedDelay = currentCircleSize / SPEED_NORMAL;
 
-      // Mise à jour de la file basée sur l'historique
-      for (let i = 0; i < player.queue.length; i++) {
-        const delay = (i + 1) * fixedDelay;
-        const delayedPos = getDelayedPosition(player.positionHistory, delay);
-        if (delayedPos) {
-          player.queue[i] = delayedPos;
-        } else {
-          player.queue[i] = { x: player.x, y: player.y };
-        }
-      }
+// Mise à jour de la file basée sur l'historique
+for (let i = 0; i < player.queue.length; i++) {
+  const delay = (i + 1) * fixedDelay;
+  const delayedPos = getDelayedPosition(player.positionHistory, delay);
+  if (delayedPos) {
+    player.queue[i] = delayedPos;
+  } else {
+    player.queue[i] = { x: player.x, y: player.y };
+  }
+}
+
 
       // Collision avec les parois
       if (
