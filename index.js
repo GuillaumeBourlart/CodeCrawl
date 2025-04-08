@@ -461,7 +461,7 @@ setInterval(() => {
         const item = room.items[i];
         const itemCircle = { x: item.x, y: item.y, radius: item.radius };
         if (item.owner && item.owner === id) {
-          if (Date.now() - item.dropTime < 10000) continue;
+          if (Date.now() - item.dropTime < 500) continue;
         }
         if (circlesCollide(headCircle, itemCircle)) {
           // Lorsqu'un item est consommé, on ajoute la valeur à itemEatenCount
