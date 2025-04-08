@@ -503,19 +503,23 @@ setInterval(() => {
 
       // Vérification de collision avec les bords
    
+// Définir la tête du joueur pour la collision avec les bords
+const headCircle = { x: player.x, y: player.y, radius: getHeadRadius(player) };
+
+// Vérification de collision avec les bords en se basant uniquement sur la tête
 if (
   headCircle.x - headCircle.radius < 0 ||
   headCircle.x + headCircle.radius > worldSize.width ||
   headCircle.y - headCircle.radius < 0 ||
   headCircle.y + headCircle.radius > worldSize.height
 ) {
-  // La tête a touché un bord, on élimine le joueur
   console.log(`Le joueur ${id} a touché une paroi avec la tête. Élimination.`);
   io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
   dropQueueItems(player, roomId);
   delete room.players[id];
   return;
 }
+
 
 
       // Collision entre le joueur et les items (basée sur la tête)
