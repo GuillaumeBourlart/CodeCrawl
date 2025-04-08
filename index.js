@@ -25,8 +25,8 @@ const itemColors = [
 const worldSize = { width: 2000, height: 2000 };
 
 // Définition de la plage de rayon pour les items
-const MIN_ITEM_RADIUS = 5;
-const MAX_ITEM_RADIUS = 20;
+const MIN_ITEM_RADIUS = 2;
+const MAX_ITEM_RADIUS = 8;
 
 const BASE_SIZE = 20; // Taille de base d'un cercle (pour le joueur)
 const MAX_ITEMS = 50;
