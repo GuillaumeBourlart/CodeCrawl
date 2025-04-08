@@ -22,7 +22,7 @@ const itemColors = [
   "#FFD133",
   "#8B5CF6",
 ];
-const worldSize = { width: 2000, height: 2000 };
+const worldSize = { width: 4000, height: 4000 };
 
 const MIN_ITEM_RADIUS = 4;
 const MAX_ITEM_RADIUS = 10;
@@ -282,10 +282,10 @@ io.on("connection", (socket) => {
         id: `dropped-${Date.now()}`,
         x: droppedSegment.x,
         y: droppedSegment.y,
-        value: 1,
+        value: 6,
         color: player.color,
         owner: socket.id,
-        radius: MIN_ITEM_RADIUS,
+        radius: MAX_ITEM_RADIUS,
         dropTime: Date.now()
       };
       roomsData[roomId].items.push(droppedItem);
@@ -299,19 +299,20 @@ io.on("connection", (socket) => {
             id: `dropped-${Date.now()}`,
             x: droppedSegment.x,
             y: droppedSegment.y,
-            value: 1,
+            value: 6,
             color: player.color,
             owner: socket.id,
-            radius: MIN_ITEM_RADIUS,
+            radius: MAX_ITEM_RADIUS,
             dropTime: Date.now()
           };
           roomsData[roomId].items.push(droppedItem);
           console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
           io.to(roomId).emit("update_items", roomsData[roomId].items);
           player.queue.pop();
-          if (player.itemEatenCount > 0) {
-            player.itemEatenCount--;
-          }
+         if (player.itemEatenCount > 0) {
+  player.itemEatenCount = Math.max(0, player.itemEatenCount - 10);
+}
+
           io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
         } else {
           clearInterval(player.boostInterval);
@@ -414,7 +415,7 @@ setInterval(() => {
       // Mise à jour de la queue basée sur l'historique
       const tailSpacing = getHeadRadius(player) * 0.4;
       // Ici, la logique est : le nombre de segments désiré est floor(itemEatenCount / 5)
-      const desiredSegments = Math.floor(player.itemEatenCount / 5);
+      const desiredSegments = Math.floor(player.itemEatenCount / 10);
       // On reconstruit la queue par interpolation sur l'historique
       const newQueue = [];
       for (let i = 0; i < desiredSegments; i++) {
