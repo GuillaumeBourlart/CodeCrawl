@@ -373,7 +373,7 @@ io.on("connection", (socket) => {
           console.log(`Fin du boost pour ${socket.id} car la queue est vide.`);
           io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
         }
-      }, 500); // toutes les 0.5 secondes, retirer un segment
+      }, 250); // toutes les 0.25 secondes, retirer un segment
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
     });
 
