@@ -23,14 +23,22 @@ const itemColors = [
   "#8F33FF",
 ];
 const worldSize = { width: 2000, height: 2000 };
-const ITEM_RADIUS = 10;
-const BASE_SIZE = 20; // Taille de base d'un cercle
+
+// Définition de la plage de rayon pour les items
+const MIN_ITEM_RADIUS = 5;
+const MAX_ITEM_RADIUS = 20;
+
+const BASE_SIZE = 20; // Taille de base d'un cercle (pour le joueur)
 const MAX_ITEMS = 50;
-// La valeur DELAY_MS n'est plus utilisée avec ce système
 
 // Vitesse
 const SPEED_NORMAL = 2;
 const SPEED_BOOST = 4;
+
+// Fonction utilitaire: renvoie un rayon aléatoire entre MIN_ITEM_RADIUS et MAX_ITEM_RADIUS
+function randomItemRadius() {
+  return Math.floor(Math.random() * (MAX_ITEM_RADIUS - MIN_ITEM_RADIUS + 1)) + MIN_ITEM_RADIUS;
+}
 
 // Fonction pour préparer l'état des joueurs à envoyer aux clients
 function getPlayersForUpdate(players) {
@@ -42,7 +50,6 @@ function getPlayersForUpdate(players) {
       direction: player.direction,
       boosting: player.boosting,
       color: player.color,
-      // On renvoie la taille de base pour l'affichage
       length: BASE_SIZE,
       queue: player.queue,
       itemEatenCount: player.itemEatenCount,
@@ -60,6 +67,8 @@ function dropQueueItems(player, roomId) {
       y: segment.y,
       value: 0,
       color: player.color,
+      // Ajout d'un rayon aléatoire pour l'item
+      radius: randomItemRadius(),
       dropTime: Date.now(),
     };
     roomsData[roomId].items.push(droppedItem);
@@ -77,13 +86,14 @@ function generateRandomItems(count, worldSize) {
       y: Math.random() * worldSize.height,
       value: Math.floor(Math.random() * 5) + 1,
       color: itemColors[Math.floor(Math.random() * itemColors.length)],
+      // Chaque item reçoit un rayon aléatoire dans la plage définie
+      radius: randomItemRadius(),
     });
   }
   return items;
 }
 
-// (Ancienne méthode basée sur un délai en ms, ici non utilisée)
-// Retourne la position différée dans l'historique selon le délai (ms)
+// Ancienne fonction (basée sur un délai en ms) – non utilisée avec le nouveau système
 function getDelayedPosition(positionHistory, delay) {
   const targetTime = Date.now() - delay;
   if (!positionHistory || positionHistory.length === 0) return null;
@@ -98,14 +108,13 @@ function getDelayedPosition(positionHistory, delay) {
 // Nouvelle fonction : retourne la position dans l'historique correspondant à une distance cumulée targetDistance
 function getPositionAtDistance(positionHistory, targetDistance) {
   let totalDistance = 0;
-  // Parcourt l'historique du plus récent vers l'ancien
+  // Parcours de l'historique du plus récent vers l'ancien
   for (let i = positionHistory.length - 1; i > 0; i--) {
     const curr = positionHistory[i];
     const prev = positionHistory[i - 1];
     const segmentDistance = Math.hypot(curr.x - prev.x, curr.y - prev.y);
     totalDistance += segmentDistance;
     if (totalDistance >= targetDistance) {
-      // Calcul d'interpolation entre curr et prev
       const overshoot = totalDistance - targetDistance;
       const fraction = overshoot / segmentDistance;
       const x = curr.x * (1 - fraction) + prev.x * fraction;
@@ -192,7 +201,7 @@ io.on("connection", (socket) => {
       };
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
-    // Initialisation du joueur avec direction aléatoire
+    // Initialisation du joueur avec une direction aléatoire
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -267,7 +276,7 @@ io.on("connection", (socket) => {
       }
       if (player.boosting) return;
 
-      // Retirer immédiatement un segment et le transformer en item
+      // Retirer immédiatement un segment et le transformer en item avec rayon aléatoire
       const droppedSegment = player.queue.pop();
       const droppedItem = {
         id: `dropped-${Date.now()}`,
@@ -276,6 +285,7 @@ io.on("connection", (socket) => {
         value: 0,
         color: player.color,
         owner: socket.id,
+        radius: randomItemRadius(),
         dropTime: Date.now(),
       };
       roomsData[roomId].items.push(droppedItem);
@@ -294,6 +304,7 @@ io.on("connection", (socket) => {
             value: 0,
             color: player.color,
             owner: socket.id,
+            radius: randomItemRadius(),
             dropTime: Date.now(),
           };
           roomsData[roomId].items.push(droppedItem);
@@ -452,7 +463,7 @@ setInterval(() => {
           if (Date.now() - item.dropTime < 10000) continue;
         }
         const dist = Math.hypot(player.x - item.x, player.y - item.y);
-        if (dist < playerRadius + ITEM_RADIUS + haloMargin) {
+        if (dist < playerRadius + item.radius + haloMargin) {
           player.itemEatenCount = (player.itemEatenCount || 0) + 1;
           if (player.queue.length < getExpectedSegments(player.itemEatenCount)) {
             if (player.queue.length === 0) {
@@ -471,6 +482,7 @@ setInterval(() => {
               y: Math.random() * worldSize.height,
               value: Math.floor(Math.random() * 5) + 1,
               color: itemColors[Math.floor(Math.random() * itemColors.length)],
+              radius: randomItemRadius(),
             };
             room.items.push(newItem);
           }
