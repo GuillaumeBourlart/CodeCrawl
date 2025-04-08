@@ -98,7 +98,7 @@ function dropQueueItems(player, roomId) {
         id: `dropped-${Date.now()}-${Math.random()}`,
         x: segment.x,
         y: segment.y,
-        value: 0,
+        value: Math.floor(Math.random() * 5) + 1,
         color: player.color,
         radius: randomItemRadius(),
         dropTime: Date.now(),
