@@ -537,34 +537,31 @@ setInterval(() => {
         if (item.owner && item.owner === id) {
           if (Date.now() - item.dropTime < 10000) continue;
         }
-        if (circlesCollide(headCircle, itemCircle)) {
-          // La consommation donne exactement un segment de queue de plus
-         
-         if (player.queue.length === 0) {
-  player.queue.push({ x: player.x, y: player.y });
-} else {
-  const lastSeg = player.queue[player.queue.length - 1];
-  player.queue.push({ x: lastSeg.x, y: lastSeg.y });
+       if (circlesCollide(headCircle, itemCircle)) {
+  // Incrémentez directement le nombre d'items mangés en ajoutant la valeur de l'item
+  player.itemEatenCount += item.value;
+  // Optionnel : Si vous voulez conserver au moins une donnée dans la queue pour le suivi
+  if (player.queue.length === 0) {
+    player.queue.push({ x: player.x, y: player.y });
+  }
+  // Vous n'avez plus besoin de la fonction updateItemsEaten qui écrase itemEatenCount
+  room.items.splice(i, 1);
+  i--;
+  if (room.items.length < MAX_ITEMS) {
+    const newItem = {
+      id: `item-${Date.now()}`,
+      x: Math.random() * worldSize.width,
+      y: Math.random() * worldSize.height,
+      value: Math.floor(Math.random() * 5) + 1,
+      color: itemColors[Math.floor(Math.random() * itemColors.length)],
+      radius: randomItemRadius(),
+    };
+    room.items.push(newItem);
+  }
+  io.to(roomId).emit("update_items", room.items);
+  break;
 }
 
-
-          updateItemsEaten(player);
-          room.items.splice(i, 1);
-          i--;
-          if (room.items.length < MAX_ITEMS) {
-            const newItem = {
-              id: `item-${Date.now()}`,
-              x: Math.random() * worldSize.width,
-              y: Math.random() * worldSize.height,
-              value: Math.floor(Math.random() * 5) + 1,
-              color: itemColors[Math.floor(Math.random() * itemColors.length)],
-              radius: randomItemRadius(),
-            };
-            room.items.push(newItem);
-          }
-          io.to(roomId).emit("update_items", room.items);
-          break;
-        }
       }
     });
     io.to(roomId).emit("update_players", getPlayersForUpdate(room.players));
