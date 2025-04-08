@@ -296,39 +296,38 @@ io.on("connection", (socket) => {
       io.to(roomId).emit("update_items", roomsData[roomId].items);
 
       player.boosting = true;
-      player.boostInterval = setInterval(() => {
-        if (player.queue.length > 5) {
-          const droppedSegment = player.queue[player.queue.length - 1];
-          const droppedItem = {
-            id: `dropped-${Date.now()}`,
-            x: droppedSegment.x,
-            y: droppedSegment.y,
-            value: 6,
-            color: player.color,
-            owner: socket.id,
-            radius: MAX_ITEM_RADIUS,
-            dropTime: Date.now()
-          };
-          roomsData[roomId].items.push(droppedItem);
-          console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
-          io.to(roomId).emit("update_items", roomsData[roomId].items);
-          player.queue.pop();
-         if (player.itemEatenCount > 50) {
-  player.itemEatenCount = Math.max(50, player.itemEatenCount - 10);
-} else {
-  clearInterval(player.boostInterval);
-  player.boosting = false;
-}
+      // Nouvelle version avec intervalle de 25 ms
+player.boostInterval = setInterval(() => {
+  if (player.queue.length > 5) {
+    const droppedSegment = player.queue[player.queue.length - 1];
+    const droppedItem = {
+      id: `dropped-${Date.now()}`,
+      x: droppedSegment.x,
+      y: droppedSegment.y,
+      value: 6,
+      color: player.color,
+      owner: socket.id,
+      radius: MAX_ITEM_RADIUS,
+      dropTime: Date.now()
+    };
+    roomsData[roomId].items.push(droppedItem);
+    io.to(roomId).emit("update_items", roomsData[roomId].items);
+    player.queue.pop();
+    // Décrémente de 10 points et arrête le boost si on atteint 50
+    if (player.itemEatenCount > 50) {
+      player.itemEatenCount = Math.max(50, player.itemEatenCount - 10);
+    } else {
+      clearInterval(player.boostInterval);
+      player.boosting = false;
+    }
+    io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
+  } else {
+    clearInterval(player.boostInterval);
+    player.boosting = false;
+    io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
+  }
+}, 250);
 
-
-          io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-        } else {
-          clearInterval(player.boostInterval);
-          player.boosting = false;
-          console.log(`Fin du boost pour ${socket.id} car la queue est vide.`);
-          io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-        }
-      }, 250);
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
     });
 
