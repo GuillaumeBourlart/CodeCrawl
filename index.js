@@ -25,8 +25,8 @@ const itemColors = [
 const worldSize = { width: 2000, height: 2000 };
 const ITEM_RADIUS = 10;
 const BASE_SIZE = 20; // Taille de base d'un cercle
-const MAX_ITEMS = 50; // Nombre maximum d'items autorisés
-const DELAY_MS = 50; // Valeur de base pour le calcul du delay
+const MAX_ITEMS = 50;
+// La valeur DELAY_MS n'est plus utilisée avec ce système
 
 // Vitesse
 const SPEED_NORMAL = 2;
@@ -82,6 +82,7 @@ function generateRandomItems(count, worldSize) {
   return items;
 }
 
+// (Ancienne méthode basée sur un délai en ms, ici non utilisée)
 // Retourne la position différée dans l'historique selon le délai (ms)
 function getDelayedPosition(positionHistory, delay) {
   const targetTime = Date.now() - delay;
@@ -89,6 +90,27 @@ function getDelayedPosition(positionHistory, delay) {
   for (let i = positionHistory.length - 1; i >= 0; i--) {
     if (positionHistory[i].time <= targetTime) {
       return { x: positionHistory[i].x, y: positionHistory[i].y };
+    }
+  }
+  return { x: positionHistory[0].x, y: positionHistory[0].y };
+}
+
+// Nouvelle fonction : retourne la position dans l'historique correspondant à une distance cumulée targetDistance
+function getPositionAtDistance(positionHistory, targetDistance) {
+  let totalDistance = 0;
+  // Parcourt l'historique du plus récent vers l'ancien
+  for (let i = positionHistory.length - 1; i > 0; i--) {
+    const curr = positionHistory[i];
+    const prev = positionHistory[i - 1];
+    const segmentDistance = Math.hypot(curr.x - prev.x, curr.y - prev.y);
+    totalDistance += segmentDistance;
+    if (totalDistance >= targetDistance) {
+      // Calcul d'interpolation entre curr et prev
+      const overshoot = totalDistance - targetDistance;
+      const fraction = overshoot / segmentDistance;
+      const x = curr.x * (1 - fraction) + prev.x * fraction;
+      const y = curr.y * (1 - fraction) + prev.y * fraction;
+      return { x, y };
     }
   }
   return { x: positionHistory[0].x, y: positionHistory[0].y };
@@ -114,8 +136,7 @@ async function findOrCreateRoom() {
     console.error("Erreur Supabase (findOrCreateRoom):", error);
     return null;
   }
-  let room =
-    existingRooms && existingRooms.length > 0 ? existingRooms[0] : null;
+  let room = existingRooms && existingRooms.length > 0 ? existingRooms[0] : null;
   if (!room) {
     const { data: newRoomData, error: newRoomError } = await supabase
       .from("rooms")
@@ -171,7 +192,7 @@ io.on("connection", (socket) => {
       };
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
-    // Initialiser le joueur avec une direction initiale et cible identiques
+    // Initialisation du joueur avec direction aléatoire
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -188,8 +209,7 @@ io.on("connection", (socket) => {
       "#F97316",
       "#0EA5E9",
     ];
-    const randomColor =
-      playerColors[Math.floor(Math.random() * playerColors.length)];
+    const randomColor = playerColors[Math.floor(Math.random() * playerColors.length)];
     roomsData[roomId].players[socket.id] = {
       x: Math.random() * 800,
       y: Math.random() * 600,
@@ -238,35 +258,17 @@ io.on("connection", (socket) => {
     });
 
     socket.on("boostStart", () => {
-  console.log(`boostStart déclenché par ${socket.id}`);
-  const player = roomsData[roomId].players[socket.id];
-  if (!player) return;
-  if (player.queue.length === 0) {
-    console.log(`boostStart impossible pour ${socket.id} car la queue est vide.`);
-    return;
-  }
-  if (player.boosting) return;
+      console.log(`boostStart déclenché par ${socket.id}`);
+      const player = roomsData[roomId].players[socket.id];
+      if (!player) return;
+      if (player.queue.length === 0) {
+        console.log(`boostStart impossible pour ${socket.id} car la queue est vide.`);
+        return;
+      }
+      if (player.boosting) return;
 
-  // Retirer immédiatement un segment et le transformer en item
-  const droppedSegment = player.queue.pop();
-  const droppedItem = {
-    id: `dropped-${Date.now()}`,
-    x: droppedSegment.x,
-    y: droppedSegment.y,
-    value: 0,
-    color: player.color,
-    owner: socket.id,
-    dropTime: Date.now()
-  };
-  roomsData[roomId].items.push(droppedItem);
-  io.to(roomId).emit("update_items", roomsData[roomId].items);
-  player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
-  io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-
-  player.boosting = true;
-  player.boostInterval = setInterval(() => {
-    if (player.queue.length > 0) {
-      const droppedSegment = player.queue[player.queue.length - 1];
+      // Retirer immédiatement un segment et le transformer en item
+      const droppedSegment = player.queue.pop();
       const droppedItem = {
         id: `dropped-${Date.now()}`,
         x: droppedSegment.x,
@@ -274,26 +276,42 @@ io.on("connection", (socket) => {
         value: 0,
         color: player.color,
         owner: socket.id,
-        dropTime: Date.now()
+        dropTime: Date.now(),
       };
       roomsData[roomId].items.push(droppedItem);
-      console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
       io.to(roomId).emit("update_items", roomsData[roomId].items);
-      player.queue.pop();
       player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-    } else {
-      clearInterval(player.boostInterval);
-      player.boosting = false;
-      console.log(`Fin du boost pour ${socket.id} car la queue est vide.`);
+
+      player.boosting = true;
+      player.boostInterval = setInterval(() => {
+        if (player.queue.length > 0) {
+          const droppedSegment = player.queue[player.queue.length - 1];
+          const droppedItem = {
+            id: `dropped-${Date.now()}`,
+            x: droppedSegment.x,
+            y: droppedSegment.y,
+            value: 0,
+            color: player.color,
+            owner: socket.id,
+            dropTime: Date.now(),
+          };
+          roomsData[roomId].items.push(droppedItem);
+          console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
+          io.to(roomId).emit("update_items", roomsData[roomId].items);
+          player.queue.pop();
+          player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
+          io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
+        } else {
+          clearInterval(player.boostInterval);
+          player.boosting = false;
+          console.log(`Fin du boost pour ${socket.id} car la queue est vide.`);
+          io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
+        }
+      }, 500);
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-    }
-  }, 500);
-  io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-});
+    });
 
-
-    // Boost stop
     socket.on("boostStop", () => {
       console.log(`boostStop déclenché par ${socket.id}`);
       const player = roomsData[roomId].players[socket.id];
@@ -350,9 +368,7 @@ setInterval(() => {
         const dy = player1.y - player2.y;
         const distance = Math.hypot(dx, dy);
         if (distance < BASE_SIZE) {
-          const dot =
-            player1.direction.x * player2.direction.x +
-            player1.direction.y * player2.direction.y;
+          const dot = player1.direction.x * player2.direction.x + player1.direction.y * player2.direction.y;
           if (dot < -0.8) {
             console.log(`Collision frontale détectée entre ${id1} et ${id2}. Élimination mutuelle.`);
             io.to(id1).emit("player_eliminated", { eliminatedBy: "collision frontale" });
@@ -401,32 +417,25 @@ setInterval(() => {
         }
       }
 
-      
+      // Mise à jour de la position de la tête
+      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
+      player.x += player.direction.x * speed;
+      player.y += player.direction.y * speed;
 
-      // Calcul du delay fixe : temps nécessaire pour parcourir la taille actuelle d'un cercle
-const currentCircleSize = BASE_SIZE * (1 + player.queue.length * 0.8);
-// Utilise la vitesse normale constant pour fixer l'espacement entre segments
-const fixedDelay = currentCircleSize / SPEED_NORMAL;
-
-// Mise à jour de la file basée sur l'historique
-for (let i = 0; i < player.queue.length; i++) {
-  const delay = (i + 1) * fixedDelay;
-  const delayedPos = getDelayedPosition(player.positionHistory, delay);
-  if (delayedPos) {
-    player.queue[i] = delayedPos;
-  } else {
-    player.queue[i] = { x: player.x, y: player.y };
-  }
-}
-
+      // === Mise à jour de la queue avec espacement constant basé sur la distance ===
+      const tailSpacing = BASE_SIZE; // Espacement constant en pixels entre segments
+      for (let i = 0; i < player.queue.length; i++) {
+        const targetDistance = (i + 1) * tailSpacing;
+        const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
+        if (posAtDistance) {
+          player.queue[i] = posAtDistance;
+        } else {
+          player.queue[i] = { x: player.x, y: player.y };
+        }
+      }
 
       // Collision avec les parois
-      if (
-        player.x < 0 ||
-        player.x > worldSize.width ||
-        player.y < 0 ||
-        player.y > worldSize.height
-      ) {
+      if (player.x < 0 || player.x > worldSize.width || player.y < 0 || player.y > worldSize.height) {
         console.log(`Le joueur ${id} a touché une paroi. Élimination.`);
         io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
         dropQueueItems(player, roomId);
