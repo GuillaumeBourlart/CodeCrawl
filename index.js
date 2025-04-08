@@ -24,7 +24,7 @@ const itemColors = [
 ];
 const worldSize = { width: 2000, height: 2000 };
 
-// Définition de la plage de rayon pour les items
+// Plage de rayon pour les items
 const MIN_ITEM_RADIUS = 4;
 const MAX_ITEM_RADIUS = 10;
 
@@ -35,43 +35,51 @@ const MAX_ITEMS = 50;
 const SPEED_NORMAL = 3.2;
 const SPEED_BOOST = 6.4;
 
-// Fonction utilitaire : renvoie un rayon aléatoire entre MIN_ITEM_RADIUS et MAX_ITEM_RADIUS
+// Renvoie un rayon aléatoire entre MIN_ITEM_RADIUS et MAX_ITEM_RADIUS
 function randomItemRadius() {
   return Math.floor(Math.random() * (MAX_ITEM_RADIUS - MIN_ITEM_RADIUS + 1)) + MIN_ITEM_RADIUS;
 }
 
-// Pour la hitbox du joueur, on définit la taille de la tête et des segments
+/*
+ * getSegmentCount calcule le nombre de segments à ajouter selon le rayon de l'item.
+ * On définit la table suivante :
+ *   rayon 4 -> 1 segment
+ *   rayon 5 -> 2 segments
+ *   rayon 6 -> 3 segments
+ *   rayon 7 -> 4 segments
+ *   rayon 8 -> 5 segments
+ *   rayon 9 ou 10 -> 6 segments
+ */
+function getSegmentCount(radius) {
+  return Math.min(radius - 3, 6);
+}
+
+// Pour la hitbox du joueur, la taille de la tête et des segments augmente en fonction du nombre de segments
 function getHeadRadius(player) {
-  // La tête grossit en fonction du nombre d'items mangés (donc de segments dans la queue)
   return BASE_SIZE / 2 + player.itemEatenCount * 0.1;
 }
 
 function getSegmentRadius(player) {
-  // Les segments grossissent de la même manière que la tête
   return BASE_SIZE / 2 + player.itemEatenCount * 0.1;
 }
 
-// Retourne la liste des cercles constituant un joueur (tête + chaque segment de la queue)
 function getPlayerCircles(player) {
   const circles = [];
-  // Ajoute la tête (index 0)
   circles.push({
     x: player.x,
     y: player.y,
-    radius: getHeadRadius(player),
+    radius: getHeadRadius(player)
   });
-  // Ajoute chaque segment de la queue
-  player.queue.forEach((segment) => {
+  player.queue.forEach(segment => {
     circles.push({
       x: segment.x,
       y: segment.y,
-      radius: getSegmentRadius(player),
+      radius: getSegmentRadius(player)
     });
   });
   return circles;
 }
 
-// Prépare l'état des joueurs à envoyer aux clients
 function getPlayersForUpdate(players) {
   const result = {};
   for (const [id, player] of Object.entries(players)) {
@@ -83,16 +91,16 @@ function getPlayersForUpdate(players) {
       color: player.color,
       length: BASE_SIZE,
       queue: player.queue,
-      itemEatenCount: player.itemEatenCount,
+      itemEatenCount: player.itemEatenCount
     };
   }
   return result;
 }
 
 /*
- * Modification de dropQueueItems :
- * - Lorsqu'un joueur meurt, chaque segment déposé (seulement 1 sur 3) aura un rayon aléatoire
- * - La valeur de l'item est fixée égale à son rayon.
+ * Lorsqu'un joueur meurt, on droppe 1 segment sur 3.
+ * Chaque item déposé aura un rayon aléatoire et sa valeur (le nombre de segments ajoutés)
+ * sera déterminée par getSegmentCount.
  */
 function dropQueueItems(player, roomId) {
   player.queue.forEach((segment, index) => {
@@ -102,10 +110,10 @@ function dropQueueItems(player, roomId) {
         id: `dropped-${Date.now()}-${Math.random()}`,
         x: segment.x,
         y: segment.y,
-        value: r/4, // la valeur est égale au rayon
+        value: getSegmentCount(r),
         color: player.color,
         radius: r,
-        dropTime: Date.now(),
+        dropTime: Date.now()
       };
       roomsData[roomId].items.push(droppedItem);
     }
@@ -114,8 +122,7 @@ function dropQueueItems(player, roomId) {
 }
 
 /*
- * Modification de generateRandomItems :
- * Chaque item aura désormais une valeur égale à son rayon.
+ * Chaque item généré aura un rayon aléatoire et sa valeur sera donnée par getSegmentCount.
  */
 function generateRandomItems(count, worldSize) {
   const items = [];
@@ -125,15 +132,15 @@ function generateRandomItems(count, worldSize) {
       id: `item-${i}-${Date.now()}`,
       x: Math.random() * worldSize.width,
       y: Math.random() * worldSize.height,
-      value: r/4, // valeur = rayon
+      value: getSegmentCount(r),
       color: itemColors[Math.floor(Math.random() * itemColors.length)],
-      radius: r,
+      radius: r
     });
   }
   return items;
 }
 
-// Fonction pour récupérer une position dans l'historique correspondant à une distance cumulée
+// Récupère une position dans l'historique correspondant à une distance cumulée
 function getPositionAtDistance(positionHistory, targetDistance) {
   let totalDistance = 0;
   for (let i = positionHistory.length - 1; i > 0; i--) {
@@ -152,8 +159,22 @@ function getPositionAtDistance(positionHistory, targetDistance) {
   return { x: positionHistory[0].x, y: positionHistory[0].y };
 }
 
-// Le nombre d'items mangés correspond exactement au nombre de segments dans la queue.
-function updateItemsEaten(player) {
+/*
+ * updatePlayerGrowth gère la croissance du joueur de façon fractionnée.
+ * Le paramètre growthValue représente le nombre de segments (entier) à ajouter.
+ * Ici, dès qu'une consommation augmente player.growth d'une unité ou plus, un segment est ajouté.
+ */
+function updatePlayerGrowth(player, growthValue) {
+  player.growth = (player.growth || 0) + growthValue;
+  while (player.growth >= 1) {
+    if (player.queue.length === 0) {
+      player.queue.push({ x: player.x, y: player.y });
+    } else {
+      const lastSeg = player.queue[player.queue.length - 1];
+      player.queue.push({ x: lastSeg.x, y: lastSeg.y });
+    }
+    player.growth -= 1;
+  }
   player.itemEatenCount = player.queue.length;
 }
 
@@ -228,7 +249,7 @@ io.on("connection", (socket) => {
     if (!roomsData[roomId]) {
       roomsData[roomId] = {
         players: {},
-        items: generateRandomItems(MAX_ITEMS, worldSize),
+        items: generateRandomItems(MAX_ITEMS, worldSize)
       };
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
@@ -260,6 +281,7 @@ io.on("connection", (socket) => {
       boosting: false,
       color: randomColor,
       itemEatenCount: 0,
+      growth: 0
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
 
@@ -307,22 +329,21 @@ io.on("connection", (socket) => {
       }
       if (player.boosting) return;
 
-      // Lors du boost, retirer immédiatement un segment et le transformer en item
-      // Les items boostés ont une valeur fixée à 1.
+      // Lors du boost, retirer immédiatement un segment et le transformer en item.
+      // Les items issus du boost auront toujours la valeur d'un item de rayon minimal.
       const droppedSegment = player.queue.pop();
       const droppedItem = {
         id: `dropped-${Date.now()}`,
         x: droppedSegment.x,
         y: droppedSegment.y,
-        value: MIN_ITEM_RADIUS/4, // valeur fixée à 1 pour les items issus du boost
+        value: getSegmentCount(MIN_ITEM_RADIUS), // Pour MIN_ITEM_RADIUS=4, cela renvoie 1
         color: player.color,
         owner: socket.id,
         radius: MIN_ITEM_RADIUS,
-        dropTime: Date.now(),
+        dropTime: Date.now()
       };
       roomsData[roomId].items.push(droppedItem);
       io.to(roomId).emit("update_items", roomsData[roomId].items);
-      player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
       updateItemsEaten(player);
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
 
@@ -334,17 +355,16 @@ io.on("connection", (socket) => {
             id: `dropped-${Date.now()}`,
             x: droppedSegment.x,
             y: droppedSegment.y,
-            value: MIN_ITEM_RADIUS/4, // toujours 1 lors du boost
+            value: getSegmentCount(MIN_ITEM_RADIUS),
             color: player.color,
             owner: socket.id,
             radius: MIN_ITEM_RADIUS,
-            dropTime: Date.now(),
+            dropTime: Date.now()
           };
           roomsData[roomId].items.push(droppedItem);
           console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
           io.to(roomId).emit("update_items", roomsData[roomId].items);
           player.queue.pop();
-          player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
           updateItemsEaten(player);
           io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
         } else {
@@ -353,7 +373,7 @@ io.on("connection", (socket) => {
           console.log(`Fin du boost pour ${socket.id} car la queue est vide.`);
           io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
         }
-      }, 500); // toutes les 0.5 secondes, on retire un segment
+      }, 500); // toutes les 0.5 secondes, retirer un segment
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
     });
 
@@ -393,15 +413,14 @@ io.on("connection", (socket) => {
   })();
 });
 
-// Boucle de simulation (toutes les 2.5 ms)
+// Boucle de simulation (environ 60 FPS, soit 16 ms)
 setInterval(() => {
   Object.keys(roomsData).forEach((roomId) => {
     const room = roomsData[roomId];
     const playerIds = Object.keys(room.players);
 
-    // Collision entre paires de joueurs : vérification tête vs tête puis tête vs queue
+    // Collision entre joueurs : vérification tête vs tête puis tête vs queue
     const playersToEliminate = new Set();
-
     for (let i = 0; i < playerIds.length; i++) {
       for (let j = i + 1; j < playerIds.length; j++) {
         const id1 = playerIds[i];
@@ -409,19 +428,14 @@ setInterval(() => {
         const player1 = room.players[id1];
         const player2 = room.players[id2];
         if (!player1 || !player2) continue;
-
-        // Récupération des cercles de tête
         const head1 = { x: player1.x, y: player1.y, radius: getHeadRadius(player1) };
         const head2 = { x: player2.x, y: player2.y, radius: getHeadRadius(player2) };
 
-        // 1. Vérification tête vs tête
         if (circlesCollide(head1, head2)) {
           playersToEliminate.add(id1);
           playersToEliminate.add(id2);
           continue;
         }
-
-        // 2. Vérification : tête de player1 vs queue de player2
         for (const segment of player2.queue) {
           const segmentCircle = { x: segment.x, y: segment.y, radius: getSegmentRadius(player2) };
           if (circlesCollide(head1, segmentCircle)) {
@@ -429,7 +443,6 @@ setInterval(() => {
             break;
           }
         }
-        // 3. Vérification : tête de player2 vs queue de player1
         for (const segment of player1.queue) {
           const segmentCircle = { x: segment.x, y: segment.y, radius: getSegmentRadius(player1) };
           if (circlesCollide(head2, segmentCircle)) {
@@ -450,14 +463,11 @@ setInterval(() => {
     // Mise à jour de chaque joueur
     Object.entries(room.players).forEach(([id, player]) => {
       if (!player.direction) return;
-
-      // Enregistrement de la position actuelle dans l'historique
       player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
       if (player.positionHistory.length > 10000) {
         player.positionHistory.shift();
       }
-
-      // Rotation progressive vers targetDirection (si défini)
+      
       if (player.targetDirection) {
         const currentDir = player.direction;
         const targetDir = player.targetDirection;
@@ -483,13 +493,11 @@ setInterval(() => {
           }
         }
       }
-
-      // Mise à jour de la position de la tête
+      
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
-
-      // Mise à jour de la queue basée sur la distance – ici, un espacement constant
+      
       const tailSpacing = BASE_SIZE;
       for (let i = 0; i < player.queue.length; i++) {
         const targetDistance = (i + 1) * tailSpacing;
@@ -500,29 +508,23 @@ setInterval(() => {
           player.queue[i] = { x: player.x, y: player.y };
         }
       }
-
-      // Vérification de collision avec les bords
-   
-// Définir la tête du joueur pour la collision avec les bords
-const headCircle = { x: player.x, y: player.y, radius: getHeadRadius(player) };
-
-// Vérification de collision avec les bords en se basant uniquement sur la tête
-if (
-  headCircle.x - headCircle.radius < 0 ||
-  headCircle.x + headCircle.radius > worldSize.width ||
-  headCircle.y - headCircle.radius < 0 ||
-  headCircle.y + headCircle.radius > worldSize.height
-) {
-  console.log(`Le joueur ${id} a touché une paroi avec la tête. Élimination.`);
-  io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
-  dropQueueItems(player, roomId);
-  delete room.players[id];
-  return;
-}
-
-
-
-      // Collision entre le joueur et les items (basée sur la tête)
+      
+      // Collision avec les bords (seulement la tête)
+      const headCircle = { x: player.x, y: player.y, radius: getHeadRadius(player) };
+      if (
+        headCircle.x - headCircle.radius < 0 ||
+        headCircle.x + headCircle.radius > worldSize.width ||
+        headCircle.y - headCircle.radius < 0 ||
+        headCircle.y + headCircle.radius > worldSize.height
+      ) {
+        console.log(`Le joueur ${id} a touché une paroi avec la tête. Élimination.`);
+        io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
+        dropQueueItems(player, roomId);
+        delete room.players[id];
+        return;
+      }
+      
+      // Collision entre le joueur et les items (seulement avec la tête)
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
         const itemCircle = { x: item.x, y: item.y, radius: item.radius };
@@ -530,17 +532,8 @@ if (
           if (Date.now() - item.dropTime < 500) continue;
         }
         if (circlesCollide(headCircle, itemCircle)) {
-          // Lorsqu'un item est consommé, le nombre de segments ajoutés égale la valeur de l'item
-          const segmentsToAdd = item.value;
-          for (let j = 0; j < segmentsToAdd; j++) {
-            if (player.queue.length === 0) {
-              player.queue.push({ x: player.x, y: player.y });
-            } else {
-              const lastSeg = player.queue[player.queue.length - 1];
-              player.queue.push({ x: lastSeg.x, y: lastSeg.y });
-            }
-          }
-          updateItemsEaten(player);
+          // Ajouter un nombre de segments égal à getSegmentCount(item.radius)
+          updatePlayerGrowth(player, getSegmentCount(item.radius));
           room.items.splice(i, 1);
           i--;
           if (room.items.length < MAX_ITEMS) {
@@ -549,9 +542,9 @@ if (
               id: `item-${Date.now()}`,
               x: Math.random() * worldSize.width,
               y: Math.random() * worldSize.height,
-              value: r, // valeur égale au rayon
+              value: getSegmentCount(r),
               color: itemColors[Math.floor(Math.random() * itemColors.length)],
-              radius: r,
+              radius: r
             };
             room.items.push(newItem);
           }
