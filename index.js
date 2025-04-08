@@ -102,7 +102,7 @@ function dropQueueItems(player, roomId) {
         id: `dropped-${Date.now()}-${Math.random()}`,
         x: segment.x,
         y: segment.y,
-        value: r, // la valeur est égale au rayon
+        value: r/4, // la valeur est égale au rayon
         color: player.color,
         radius: r,
         dropTime: Date.now(),
@@ -125,7 +125,7 @@ function generateRandomItems(count, worldSize) {
       id: `item-${i}-${Date.now()}`,
       x: Math.random() * worldSize.width,
       y: Math.random() * worldSize.height,
-      value: r, // valeur = rayon
+      value: r/4, // valeur = rayon
       color: itemColors[Math.floor(Math.random() * itemColors.length)],
       radius: r,
     });
@@ -314,10 +314,10 @@ io.on("connection", (socket) => {
         id: `dropped-${Date.now()}`,
         x: droppedSegment.x,
         y: droppedSegment.y,
-        value: 1, // valeur fixée à 1 pour les items issus du boost
+        value: MIN_ITEM_RADIUS/4, // valeur fixée à 1 pour les items issus du boost
         color: player.color,
         owner: socket.id,
-        radius: randomItemRadius(),
+        radius: MIN_ITEM_RADIUS,
         dropTime: Date.now(),
       };
       roomsData[roomId].items.push(droppedItem);
@@ -334,10 +334,10 @@ io.on("connection", (socket) => {
             id: `dropped-${Date.now()}`,
             x: droppedSegment.x,
             y: droppedSegment.y,
-            value: 1, // toujours 1 lors du boost
+            value: MIN_ITEM_RADIUS/4, // toujours 1 lors du boost
             color: player.color,
             owner: socket.id,
-            radius: randomItemRadius(),
+            radius: MIN_ITEM_RADIUS,
             dropTime: Date.now(),
           };
           roomsData[roomId].items.push(droppedItem);
