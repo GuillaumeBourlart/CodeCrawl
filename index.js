@@ -502,7 +502,7 @@ setInterval(() => {
       }
 
       // Vérification de collision avec les bords
-     const headCircle = { x: player.x, y: player.y, radius: getHeadRadius(player) };
+   
 if (
   headCircle.x - headCircle.radius < 0 ||
   headCircle.x + headCircle.radius > worldSize.width ||
