@@ -31,8 +31,8 @@ const BASE_SIZE = 20; // Taille de base d'un cercle pour la tête
 const MAX_ITEMS = 50;
 
 // Vitesse : elles restent constantes quelle que soit la taille
-const SPEED_NORMAL = 0.5;
-const SPEED_BOOST = 1;
+const SPEED_NORMAL = 3.2;
+const SPEED_BOOST = 6.4;
 
 // --- Fonctions utilitaires ---
 
