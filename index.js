@@ -537,34 +537,40 @@ setInterval(() => {
         if (item.owner && item.owner === id) {
           if (Date.now() - item.dropTime < 10000) continue;
         }
-       if (circlesCollide(headCircle, itemCircle)) {
-          // Ajoute autant de segments que la valeur de l'item
-          const segmentsToAdd = item.value; // Par exemple, un item "de taille 6" ajoute 6 segments
-          for (let j = 0; j < segmentsToAdd; j++) {
-            if (player.queue.length === 0) {
-              player.queue.push({ x: player.x, y: player.y });
-            } else {
-              const lastSeg = player.queue[player.queue.length - 1];
-              player.queue.push({ x: lastSeg.x, y: lastSeg.y });
-            }
-          }
-          updateItemsEaten(player);
-          room.items.splice(i, 1);
-          i--;
-          if (room.items.length < MAX_ITEMS) {
-            const newItem = {
-              id: `item-${Date.now()}`,
-              x: Math.random() * worldSize.width,
-              y: Math.random() * worldSize.height,
-              value: Math.floor(Math.random() * 5) + 1,
-              color: itemColors[Math.floor(Math.random() * itemColors.length)],
-              radius: randomItemRadius(),
-            };
-            room.items.push(newItem);
-          }
-          io.to(roomId).emit("update_items", room.items);
-          break;
-        }
+      // Collision avec un item basée sur la tête
+if (circlesCollide(headCircle, itemCircle)) {
+  // Ajoute autant de segments que la "value" de l'item
+  const segmentsToAdd = item.value;
+  for (let j = 0; j < segmentsToAdd; j++) {
+    if (player.queue.length === 0) {
+      // Si la queue est vide, on ajoute un segment à la position de la tête
+      player.queue.push({ x: player.x, y: player.y });
+    } else {
+      // Sinon, on duplique le dernier segment existant
+      const lastSeg = player.queue[player.queue.length - 1];
+      player.queue.push({ x: lastSeg.x, y: lastSeg.y });
+    }
+  }
+  // Incrémente directement itemEatenCount de la valeur de l'item
+  player.itemEatenCount += item.value;
+  
+  room.items.splice(i, 1);
+  i--;
+  if (room.items.length < MAX_ITEMS) {
+    const newItem = {
+      id: `item-${Date.now()}`,
+      x: Math.random() * worldSize.width,
+      y: Math.random() * worldSize.height,
+      value: Math.floor(Math.random() * 5) + 1,
+      color: itemColors[Math.floor(Math.random() * itemColors.length)],
+      radius: randomItemRadius(),
+    };
+    room.items.push(newItem);
+  }
+  io.to(roomId).emit("update_items", room.items);
+  break;
+}
+
 
       }
     });
