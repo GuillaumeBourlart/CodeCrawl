@@ -344,7 +344,7 @@ io.on("connection", (socket) => {
           console.log(`Segment retiré de ${socket.id} et transformé en item:`, droppedItem);
           io.to(roomId).emit("update_items", roomsData[roomId].items);
           player.queue.pop();
-          player.length = BASE_SIZE * (1 + player.queue.length * 0.0005);
+          player.length = BASE_SIZE * (1 + player.queue.length * 0.001);
           updateItemsEaten(player);
           io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
         } else {
