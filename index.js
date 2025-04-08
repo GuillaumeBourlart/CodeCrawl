@@ -32,8 +32,8 @@ const BASE_SIZE = 20; // Taille de base d'un cercle (pour le joueur)
 const MAX_ITEMS = 50;
 
 // Vitesse
-const SPEED_NORMAL = 2;
-const SPEED_BOOST = 4;
+const SPEED_NORMAL = 0.5;
+const SPEED_BOOST = 1;
 
 // Fonction utilitaire: renvoie un rayon aléatoire entre MIN_ITEM_RADIUS et MAX_ITEM_RADIUS
 function randomItemRadius() {
@@ -493,7 +493,7 @@ setInterval(() => {
     });
     io.to(roomId).emit("update_players", getPlayersForUpdate(room.players));
   });
-}, 2);
+}, 2.5);
 
 app.get("/", (req, res) => {
   res.send("Hello from the Snake.io-like server!");
