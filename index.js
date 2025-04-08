@@ -274,7 +274,7 @@ io.on("connection", (socket) => {
       console.log(`boostStart déclenché par ${socket.id}`);
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
-      if (player.queue.length === 0) {
+      if (player.queue.length <= 5) {
         console.log(`boostStart impossible pour ${socket.id} car la queue est vide.`);
         return;
       }
@@ -297,7 +297,7 @@ io.on("connection", (socket) => {
 
       player.boosting = true;
       player.boostInterval = setInterval(() => {
-        if (player.queue.length > 0) {
+        if (player.queue.length > 5) {
           const droppedSegment = player.queue[player.queue.length - 1];
           const droppedItem = {
             id: `dropped-${Date.now()}`,
