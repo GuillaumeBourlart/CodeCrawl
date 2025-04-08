@@ -91,18 +91,22 @@ function getPlayersForUpdate(players) {
 }
 
 // Convertit la queue d'un joueur en items et met à jour les clients
+
 function dropQueueItems(player, roomId) {
-  player.queue.forEach((segment) => {
-    const droppedItem = {
-      id: `dropped-${Date.now()}-${Math.random()}`,
-      x: segment.x,
-      y: segment.y,
-      value: 0,
-      color: player.color,
-      radius: randomItemRadius(),
-      dropTime: Date.now(),
-    };
-    roomsData[roomId].items.push(droppedItem);
+  player.queue.forEach((segment, index) => {
+    // Drop uniquement si index est divisible par 3 (donc 0, 3, 6, …)
+    if (index % 3 === 0) {
+      const droppedItem = {
+        id: `dropped-${Date.now()}-${Math.random()}`,
+        x: segment.x,
+        y: segment.y,
+        value: Math.floor(Math.random() * 5) + 1,
+        color: player.color,
+        radius: randomItemRadius(),
+        dropTime: Date.now(),
+      };
+      roomsData[roomId].items.push(droppedItem);
+    }
   });
   io.to(roomId).emit("update_items", roomsData[roomId].items);
 }
