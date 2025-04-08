@@ -28,7 +28,7 @@ const MIN_ITEM_RADIUS = 4;
 const MAX_ITEM_RADIUS = 10;
 
 const BASE_SIZE = 20; // Taille de base d'un cercle pour la tête
-const MAX_ITEMS = 50;
+const MAX_ITEMS = 300;
 
 // Vitesse : elles restent constantes quelle que soit la taille
 const SPEED_NORMAL = 3.2;
