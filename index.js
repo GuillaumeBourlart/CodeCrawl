@@ -525,18 +525,24 @@ setInterval(() => {
         player.positionHistory.shift();
       }
       // Récalcule la queue en appliquant le pattern de 20 couleurs
-      const skinData = player.skinColors || getDefaultSkinColors();
-      const tailSpacing = getHeadRadius(player) * 0.2;
-      const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
-      const newQueue = [];
-      for (let i = 0; i < desiredSegments; i++) {
-        const targetDistance = (i + 1) * tailSpacing;
-        const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
-        // Pour le pattern, le premier segment (i = 0) reçoit skinData.colors[1], puis on boucle sur 19 couleurs
-        const color = skinData.colors[((i) % 19) + 1];
-        newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: color });
-      }
-      player.queue = newQueue;
+     const skinData = player.skinColors || getDefaultSkinColors();
+// Assurez-vous que 'colors' est bien un tableau de 20 couleurs
+const colors = (skinData && Array.isArray(skinData.colors) && skinData.colors.length >= 20)
+  ? skinData.colors
+  : getDefaultSkinColors();
+
+const tailSpacing = getHeadRadius(player) * 0.2;
+const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
+const newQueue = [];
+for (let i = 0; i < desiredSegments; i++) {
+  const targetDistance = (i + 1) * tailSpacing;
+  const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
+  // Pour le pattern des 20 couleurs :
+  // La tête utilise colors[0] (déjà attribuée ailleurs) et pour la queue, on commence à colors[1]
+  const color = colors[((i) % 19) + 1];
+  newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: color });
+}
+player.queue = newQueue;
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
