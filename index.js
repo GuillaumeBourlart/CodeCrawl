@@ -34,9 +34,8 @@ const SPEED_NORMAL = 3.2;
 const SPEED_BOOST = 6.4;
 const BOUNDARY_MARGIN = 100;
 
-// Paramètres pour le joueur et boost
-const DEFAULT_ITEM_EATEN_COUNT = 18; // 18 => 6 segments par défaut
-const BOOST_ITEM_COST = 3;
+const DEFAULT_ITEM_EATEN_COUNT = 18; // Correspond à 6 segments (18/3 = 6)
+const BOOST_ITEM_COST = 3;           // Booster enlève 1 segment = 3 points
 const BOOST_INTERVAL_MS = 250;
 
 // --- Fonction de clamp ---
@@ -47,32 +46,26 @@ function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
   };
 }
 
-// --- Récupération du skin depuis la base ---
-// On va récupérer le skin depuis la table "skins", champ "data_json"
-// La fonction renvoie un objet avec la propriété "colors" (un tableau de 20 couleurs)
+// --- Récupération du skin depuis la DB ---
+// La colonne "data" (de type jsonb) de la table "game_skins" contient un objet JSON avec un tableau "colors" de 20 couleurs.
 async function getSkinDataFromDB(skin_id) {
   const { data, error } = await supabase
     .from("game_skins")
     .select("data")
     .eq("id", skin_id)
     .single();
-  
+
   if (error || !data) {
     console.error("Erreur de récupération du skin :", error);
-    return { colors: getDefaultSkinColors() };
+    return getDefaultSkinColors();
   }
-  
-  // La colonne "data" contient déjà le JSON sous forme d'objet.
-  const skin = data.data;
-  
+  const skin = data.data; // La colonne "data" contient déjà l'objet JSON
   if (!skin || !skin.colors || skin.colors.length !== 20) {
     console.warn("Le skin récupéré ne contient pas 20 couleurs. Utilisation du skin par défaut.");
-    return { colors: getDefaultSkinColors() };
+    return getDefaultSkinColors();
   }
-  
-  return skin;
+  return skin.colors;
 }
-
 
 function getDefaultSkinColors() {
   return [
@@ -84,7 +77,6 @@ function getDefaultSkinColors() {
 }
 
 function getItemValue(radius) {
-  // min radius => 1, max radius => 6 (interpolation linéaire)
   return Math.round(1 + ((radius - MIN_ITEM_RADIUS) / (MAX_ITEM_RADIUS - MIN_ITEM_RADIUS)) * 5);
 }
 
@@ -100,12 +92,11 @@ function getSegmentRadius(player) {
   return BASE_SIZE / 2 + Math.max(0, player.itemEatenCount - DEFAULT_ITEM_EATEN_COUNT) * 0.05;
 }
 
-// Retourne les cercles du joueur avec la couleur appliquée grâce au skin.
-// La tête utilise skinColors[0] et la queue applique, pour chaque segment d’indice i,
-// la couleur skinColors[((i) % 19) + 1] (car 19 couleurs pour la queue, qui se répètent).
+// Retourne les cercles à dessiner pour le joueur, en appliquant le skin :
 function getPlayerCircles(player) {
   const skinColors = player.skinColors || getDefaultSkinColors();
   const circles = [];
+  // La tête utilise la première couleur du skin
   circles.push({
     x: player.x,
     y: player.y,
@@ -117,7 +108,7 @@ function getPlayerCircles(player) {
       x: segment.x,
       y: segment.y,
       radius: getSegmentRadius(player),
-      color: segment.color
+      color: segment.color // La couleur est attribuée lors du calcul de la queue
     });
   });
   return circles;
@@ -169,7 +160,6 @@ function circlesCollide(circ1, circ2) {
 }
 
 // --- Gestion des items (drops / génération) ---
-// Lorsqu'on drop des items depuis la queue, on utilise la couleur stockée dans le segment correspondant.
 function dropQueueItems(player, roomId) {
   player.queue.forEach((segment, index) => {
     if (index % 3 === 0) {
@@ -181,7 +171,7 @@ function dropQueueItems(player, roomId) {
         x: pos.x,
         y: pos.y,
         value: value,
-        color: segment.color,
+        color: segment.color, // Couleur du segment correspondant
         radius: r,
         dropTime: Date.now()
       };
@@ -307,25 +297,25 @@ io.on("connection", (socket) => {
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
     
-    const defaultDirection = { x: Math.random()*2-1, y: Math.random()*2-1 };
+    const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x**2 + defaultDirection.y**2) || 1;
     defaultDirection.x /= mag;
     defaultDirection.y /= mag;
     
-    // Initialisation du joueur : 6 segments par défaut, itemEatenCount = DEFAULT_ITEM_EATEN_COUNT
-    // skin_id ne peut être null, il sera défini via setPlayerInfo par le client.
+    // Initialisation du joueur : 6 segments par défaut
+    // Le client doit envoyer via "setPlayerInfo" un pseudo et un skin_id (skin_id ne peut être null)
     roomsData[roomId].players[socket.id] = {
-      x: Math.random()*800,
-      y: Math.random()*600,
+      x: Math.random() * 800,
+      y: Math.random() * 600,
       length: BASE_SIZE,
       positionHistory: [],
       direction: defaultDirection,
       boosting: false,
-      color: null,      // Sera défini via setPlayerInfo
-      pseudo: null,     // Sera défini via setPlayerInfo
-      skin_id: null,    // Sera défini via setPlayerInfo (skin choisi par le client)
+      color: null,      // Définie via setPlayerInfo
+      pseudo: null,     // Définie via setPlayerInfo
+      skin_id: null,    // Définie via setPlayerInfo
       itemEatenCount: DEFAULT_ITEM_EATEN_COUNT,
-      queue: Array(6).fill({ x: Math.random()*800, y: Math.random()*600 })
+      queue: Array(6).fill({ x: Math.random() * 800, y: Math.random() * 600 })
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
     socket.join(roomId);
@@ -338,11 +328,10 @@ io.on("connection", (socket) => {
       if (player && data.pseudo && data.skin_id) {
         player.pseudo = data.pseudo;
         player.skin_id = data.skin_id;
-        // Récupération du skin depuis Supabase
-        const skinData = await getSkinDataFromDB(player.skin_id);
-        player.skinColors = skinData.colors; // Tableau de 20 couleurs
-        // Couleur de la tête = première couleur du skin
-        player.color = skinData.colors[0];
+        // Récupération du skin réel depuis Supabase
+        const skinColors = await getSkinDataFromDB(player.skin_id);
+        player.skinColors = skinColors; // Tableau de 20 couleurs
+        player.color = skinColors[0];   // Couleur de la tête
       }
       console.log(`Infos définies pour ${socket.id}:`, data);
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
@@ -352,7 +341,7 @@ io.on("connection", (socket) => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
       const { x, y } = data.direction;
-      const mag = Math.sqrt(x*x + y*y) || 1;
+      const mag = Math.sqrt(x * x + y * y) || 1;
       let newDir = { x: x / mag, y: y / mag };
       const currentDir = player.direction;
       const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
@@ -374,10 +363,8 @@ io.on("connection", (socket) => {
     socket.on("boostStart", () => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
-      // On autorise le boost uniquement si la queue contient plus de 6 segments
       if (player.queue.length <= 6) return;
       if (player.boosting) return;
-      
       // Lors du boost, on retire immédiatement un segment en conservant sa couleur.
       const droppedSegment = player.queue.pop();
       const r = randomItemRadius();
@@ -395,17 +382,17 @@ io.on("connection", (socket) => {
       };
       roomsData[roomId].items.push(droppedItem);
       io.to(roomId).emit("update_items", roomsData[roomId].items);
-      
+
       if (player.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
         player.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT, player.itemEatenCount - BOOST_ITEM_COST);
       }
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-      
+
       if (player.queue.length <= 6) {
         player.boosting = false;
         return;
       }
-      
+
       player.boosting = true;
       player.boostInterval = setInterval(() => {
         if (player.queue.length > 6) {
@@ -439,7 +426,7 @@ io.on("connection", (socket) => {
           io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
         }
       }, BOOST_INTERVAL_MS);
-      
+
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
     });
 
@@ -476,7 +463,6 @@ io.on("connection", (socket) => {
   })();
 });
 
-// Boucle de mise à jour du jeu : on recalcule la queue et on applique le pattern de skin.
 setInterval(() => {
   Object.keys(roomsData).forEach(roomId => {
     const room = roomsData[roomId];
@@ -525,28 +511,28 @@ setInterval(() => {
       if (player.positionHistory.length > 5000) {
         player.positionHistory.shift();
       }
-      // Récalcule la queue en appliquant le pattern de 20 couleurs
-     const skinData = player.skinColors || getDefaultSkinColors();
-// Assurez-vous que 'colors' est bien un tableau de 20 couleurs
-const colors = (skinData && Array.isArray(skinData.colors) && skinData.colors.length >= 20)
-  ? skinData.colors
-  : getDefaultSkinColors();
-
-const tailSpacing = getHeadRadius(player) * 0.2;
-const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
-const newQueue = [];
-for (let i = 0; i < desiredSegments; i++) {
-  const targetDistance = (i + 1) * tailSpacing;
-  const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
-  // Pour le pattern des 20 couleurs :
-  // La tête utilise colors[0] (déjà attribuée ailleurs) et pour la queue, on commence à colors[1]
-  const color = colors[((i) % 19) + 1];
-  newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: color });
-}
-player.queue = newQueue;
+      
+      // Recalcul de la queue en appliquant le pattern du skin
+      const skinColors = player.skinColors || getDefaultSkinColors();
+      const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
+          ? skinColors
+          : getDefaultSkinColors();
+      const tailSpacing = getHeadRadius(player) * 0.2;
+      const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
+      const newQueue = [];
+      for (let i = 0; i < desiredSegments; i++) {
+        const targetDistance = (i + 1) * tailSpacing;
+        const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
+        // Pour la queue, on commence à appliquer les couleurs à partir de colors[1]
+        const segmentColor = colors[((i) % 19) + 1];
+        newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
+      }
+      player.queue = newQueue;
+      
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
+      
       const circles = getPlayerCircles(player);
       for (const c of circles) {
         if (
@@ -562,6 +548,7 @@ player.queue = newQueue;
           return;
         }
       }
+      
       const headCircle = { x: player.x, y: player.y, radius: getHeadRadius(player) };
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
@@ -576,7 +563,7 @@ player.queue = newQueue;
           const segmentsToAdd = targetQueueLength - oldQueueLength;
           for (let j = 0; j < segmentsToAdd; j++) {
             if (player.queue.length === 0) {
-              player.queue.push({ x: player.x, y: player.y, color: skinData.colors[1] });
+              player.queue.push({ x: player.x, y: player.y, color: colors[1] });
             } else {
               const lastSeg = player.queue[player.queue.length - 1];
               player.queue.push({ x: lastSeg.x, y: lastSeg.y, color: lastSeg.color });
