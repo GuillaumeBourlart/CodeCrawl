@@ -62,15 +62,17 @@ async function getSkinDataFromDB(skin_id) {
     return { colors: getDefaultSkinColors() };
   }
   
-  // Puisque la colonne est de type jsonb, data.data est déjà un objet
+  // La colonne "data" contient déjà le JSON sous forme d'objet.
   const skin = data.data;
-  if (!skin.colors || skin.colors.length !== 20) {
+  
+  if (!skin || !skin.colors || skin.colors.length !== 20) {
     console.warn("Le skin récupéré ne contient pas 20 couleurs. Utilisation du skin par défaut.");
     return { colors: getDefaultSkinColors() };
   }
   
   return skin;
 }
+
 
 function getDefaultSkinColors() {
   return [
