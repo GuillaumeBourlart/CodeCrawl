@@ -49,11 +49,11 @@ function randomItemRadius() {
 }
 
 function getHeadRadius(player) {
-  return BASE_SIZE / 2 + player.itemEatenCount * 0.05 * 1.2;
+  return BASE_SIZE / 2 + player.itemEatenCount * 0.01 * 1.2;
 }
 
 function getSegmentRadius(player) {
-  return BASE_SIZE / 2 + player.itemEatenCount * 0.05;
+  return BASE_SIZE / 2 + player.itemEatenCount * 0.01;
 }
 
 function getPlayerCircles(player) {
@@ -486,7 +486,7 @@ setInterval(() => {
       }
       
       const tailSpacing = getHeadRadius(player) * 0.4;
-      const desiredSegments = Math.floor(player.itemEatenCount / 10);
+      const desiredSegments = Math.floor(player.itemEatenCount / 3);
       const newQueue = [];
       for (let i = 0; i < desiredSegments; i++) {
         const targetDistance = (i + 1) * tailSpacing;
