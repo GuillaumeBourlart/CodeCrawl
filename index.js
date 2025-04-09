@@ -271,17 +271,47 @@ io.on("connection", (socket) => {
     });
 
     socket.on("boostStart", () => {
-      console.log(`boostStart déclenché par ${socket.id}`);
-      const player = roomsData[roomId].players[socket.id];
-      if (!player) return;
-      if (player.queue.length <= 5) {
-        console.log(`boostStart impossible pour ${socket.id} car la queue est vide.`);
-        return;
-      }
-      if (player.boosting) return;
-      
-      // Au boost, retirer immédiatement un segment et le transformer en item
-      const droppedSegment = player.queue.pop();
+  console.log(`boostStart déclenché par ${socket.id}`);
+  const player = roomsData[roomId].players[socket.id];
+  if (!player) return;
+  if (player.queue.length <= 5) {
+    console.log(`boostStart impossible pour ${socket.id} car la queue est minimale.`);
+    return;
+  }
+  if (player.boosting) return;
+  
+  // Retirer immédiatement un segment et le transformer en item
+  const droppedSegment = player.queue.pop();
+  const droppedItem = {
+    id: `dropped-${Date.now()}`,
+    x: droppedSegment.x,
+    y: droppedSegment.y,
+    value: 6,
+    color: player.color,
+    owner: socket.id,
+    radius: MAX_ITEM_RADIUS,
+    dropTime: Date.now()
+  };
+  roomsData[roomId].items.push(droppedItem);
+  io.to(roomId).emit("update_items", roomsData[roomId].items);
+
+  // Décrémente itemEatenCount de 10 et émet la mise à jour
+  if (player.itemEatenCount > 50) {
+    player.itemEatenCount = Math.max(50, player.itemEatenCount - 10);
+  }
+  io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
+
+  // Vérifier si la queue est maintenant de 5 segments : dans ce cas, on arrête le boost ici
+  if (player.queue.length === 5) {
+    player.boosting = false;
+    return;
+  }
+
+  // Sinon, démarrez l'intervalle de boost pour retirer d'autres segments si disponibles
+  player.boosting = true;
+  player.boostInterval = setInterval(() => {
+    if (player.queue.length > 5) {
+      const droppedSegment = player.queue[player.queue.length - 1];
       const droppedItem = {
         id: `dropped-${Date.now()}`,
         x: droppedSegment.x,
@@ -294,42 +324,24 @@ io.on("connection", (socket) => {
       };
       roomsData[roomId].items.push(droppedItem);
       io.to(roomId).emit("update_items", roomsData[roomId].items);
-
-      player.boosting = true;
-      // Nouvelle version avec intervalle de 25 ms
-player.boostInterval = setInterval(() => {
-  if (player.queue.length > 5) {
-    const droppedSegment = player.queue[player.queue.length - 1];
-    const droppedItem = {
-      id: `dropped-${Date.now()}`,
-      x: droppedSegment.x,
-      y: droppedSegment.y,
-      value: 6,
-      color: player.color,
-      owner: socket.id,
-      radius: MAX_ITEM_RADIUS,
-      dropTime: Date.now()
-    };
-    roomsData[roomId].items.push(droppedItem);
-    io.to(roomId).emit("update_items", roomsData[roomId].items);
-    player.queue.pop();
-    // Décrémente de 10 points et arrête le boost si on atteint 50
-    if (player.itemEatenCount > 50) {
-      player.itemEatenCount = Math.max(50, player.itemEatenCount - 10);
+      player.queue.pop();
+      if (player.itemEatenCount > 50) {
+        player.itemEatenCount = Math.max(50, player.itemEatenCount - 10);
+      } else {
+        clearInterval(player.boostInterval);
+        player.boosting = false;
+      }
+      io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
     } else {
       clearInterval(player.boostInterval);
       player.boosting = false;
-    }
-    io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-  } else {
-    clearInterval(player.boostInterval);
-    player.boosting = false;
-    io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-  }
-}, 250);
-
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-    });
+    }
+  }, 25);
+
+  io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
+});
+
 
     socket.on("boostStop", () => {
       console.log(`boostStop déclenché par ${socket.id}`);
