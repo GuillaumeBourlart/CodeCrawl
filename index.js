@@ -3,7 +3,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
-app.use(cors({ origin: "*" })); // Ou préciser l'origine autorisée en production
+
 
 const { SUPABASE_URL = "", SUPABASE_ANON_KEY = "", PORT = 3000 } = process.env;
 console.log("SUPABASE_URL:", SUPABASE_URL);
@@ -13,6 +13,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
+app.use(cors({ origin: "*" })); // Ou préciser l'origine autorisée en production
 
 // --- Configuration ---
 const itemColors = [
