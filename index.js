@@ -29,7 +29,6 @@ const MAX_ITEM_RADIUS = 10;
 
 const BASE_SIZE = 20; // Taille de base d'un cercle pour la tête
 const MAX_ITEMS = 300;
-
 const SPEED_NORMAL = 3.2;
 const SPEED_BOOST = 6.4;
 
@@ -72,6 +71,7 @@ function getPlayersForUpdate(players) {
       direction: player.direction,
       boosting: player.boosting,
       color: player.color,
+      pseudo: player.pseudo,
       length: BASE_SIZE,
       queue: player.queue,
       itemEatenCount: player.itemEatenCount
@@ -94,7 +94,10 @@ function getPositionAtDistance(positionHistory, targetDistance) {
     if (totalDistance >= targetDistance) {
       const overshoot = totalDistance - targetDistance;
       const fraction = overshoot / segmentDistance;
-      return { x: curr.x * (1 - fraction) + prev.x * fraction, y: curr.y * (1 - fraction) + prev.y * fraction };
+      return {
+        x: curr.x * (1 - fraction) + prev.x * fraction,
+        y: curr.y * (1 - fraction) + prev.y * fraction
+      };
     }
   }
   return { x: positionHistory[0].x, y: positionHistory[0].y };
@@ -140,12 +143,12 @@ function generateRandomItems(count, worldSize) {
 const roomsData = {};
 
 // --- Mise à jour du leaderboard global avec Supabase ---
-// Cette fonction met à jour (upsert) le score final d'un joueur dans la table "global_leaderboard".
-// Pensez à créer cette table dans Supabase avec au minimum des colonnes "id" (clé primaire) et "score".
-async function updateGlobalLeaderboard(playerId, score) {
+// Cette fonction effectue un upsert sur la table "global_leaderboard"
+// avec l'id, le pseudo et le score du joueur.
+async function updateGlobalLeaderboard(playerId, score, pseudo) {
   const { data, error } = await supabase
     .from("global_leaderboard")
-    .upsert([{ id: playerId, score }]);
+    .upsert([{ id: playerId, pseudo, score }]);
   if (error) {
     console.error("Erreur lors de la mise à jour du leaderboard global:", error);
   }
@@ -220,6 +223,7 @@ io.on("connection", (socket) => {
       };
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
+    // Initialisation du joueur avec une propriété "pseudo" qui sera défini plus tard
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -240,6 +244,7 @@ io.on("connection", (socket) => {
       direction: defaultDirection,
       boosting: false,
       color: randomColor,
+      pseudo: null,         // Ce champ sera mis à jour lorsque le joueur choisira son pseudo
       itemEatenCount: 50,
       queue: Array(5).fill({ x: initialX, y: initialY })
     };
@@ -248,6 +253,15 @@ io.on("connection", (socket) => {
     socket.emit("joined_room", { roomId });
     io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
     io.to(roomId).emit("update_items", roomsData[roomId].items);
+
+    // Gestion de l'événement pour définir le pseudo du joueur
+    socket.on("setPseudo", (data) => {
+      const player = roomsData[roomId].players[socket.id];
+      if (player && data.pseudo) {
+        player.pseudo = data.pseudo;
+        console.log(`Le joueur ${socket.id} a choisi le pseudo : ${data.pseudo}`);
+      }
+    });
 
     socket.on("changeDirection", (data) => {
       console.log(`changeDirection reçu de ${socket.id}:`, data);
@@ -362,8 +376,8 @@ io.on("connection", (socket) => {
       const player = roomsData[roomId].players[socket.id];
       if (player) {
         dropQueueItems(player, roomId);
-        // MAJ du leaderboard global avant suppression
-        updateGlobalLeaderboard(socket.id, player.itemEatenCount);
+        // Mise à jour du leaderboard global en envoyant le pseudo
+        updateGlobalLeaderboard(socket.id, player.itemEatenCount, player.pseudo || "Anonyme");
       }
       delete roomsData[roomId].players[socket.id];
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
@@ -375,8 +389,7 @@ io.on("connection", (socket) => {
         console.log(`Suppression du joueur ${socket.id} de la room ${roomId}`);
         const player = roomsData[roomId].players[socket.id];
         dropQueueItems(player, roomId);
-        // MAJ du leaderboard global avant suppression
-        updateGlobalLeaderboard(socket.id, player.itemEatenCount);
+        updateGlobalLeaderboard(socket.id, player.itemEatenCount, player.pseudo || "Anonyme");
         delete roomsData[roomId].players[socket.id];
       }
       await leaveRoom(roomId);
@@ -425,8 +438,7 @@ setInterval(() => {
       io.to(id).emit("player_eliminated", { eliminatedBy: "collision" });
       if (room.players[id]) {
         dropQueueItems(room.players[id], roomId);
-        // MAJ du leaderboard global avant suppression
-        updateGlobalLeaderboard(id, room.players[id].itemEatenCount);
+        updateGlobalLeaderboard(id, room.players[id].itemEatenCount, room.players[id].pseudo || "Anonyme");
         delete room.players[id];
       }
     });
@@ -468,8 +480,7 @@ setInterval(() => {
           console.log(`Le joueur ${id} a touché une paroi. Élimination.`);
           io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
           dropQueueItems(player, roomId);
-          // MAJ du leaderboard global avant suppression
-          updateGlobalLeaderboard(id, player.itemEatenCount);
+          updateGlobalLeaderboard(id, player.itemEatenCount, player.pseudo || "Anonyme");
           delete room.players[id];
           return;
         }
@@ -484,7 +495,6 @@ setInterval(() => {
           if (Date.now() - item.dropTime < 500) continue;
         }
         if (circlesCollide(headCircle, itemCircle)) {
-          // Lorsqu'un item est consommé, on ajoute la valeur au score et on ajuste la queue.
           const oldQueueLength = player.queue.length;
           player.itemEatenCount += item.value;
           const targetQueueLength = Math.floor(player.itemEatenCount / 10);
@@ -521,6 +531,7 @@ setInterval(() => {
       .sort(([, a], [, b]) => b.itemEatenCount - a.itemEatenCount);
     const top10 = sortedPlayers.slice(0, 10).map(([id, player]) => ({
       id,
+      pseudo: player.pseudo || "Anonyme",
       score: player.itemEatenCount,
       color: player.color
     }));
@@ -529,6 +540,10 @@ setInterval(() => {
     io.to(roomId).emit("update_players", getPlayersForUpdate(room.players));
   });
 }, 16);
+
+app.get("/", (req, res) => {
+  res.send("Hello from the Snake.io-like server!");
+});
 
 // --- Endpoint pour récupérer le leaderboard global ---
 app.get("/globalLeaderboard", async (req, res) => {
@@ -544,11 +559,6 @@ app.get("/globalLeaderboard", async (req, res) => {
   res.json(data);
 });
 
-app.get("/", (req, res) => {
-  res.send("Hello from the Snake.io-like server!");
-});
-
 httpServer.listen(PORT, () => {
   console.log(`Serveur démarré sur le port ${PORT}`);
 });
-
