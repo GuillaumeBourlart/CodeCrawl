@@ -35,6 +35,11 @@ const SPEED_NORMAL = 3.2;
 const SPEED_BOOST = 6.4;
 const BOUNDARY_MARGIN = 100; // Marge de 100px à respecter par rapport aux bords
 
+// Paramètres pour la gestion du joueur par défaut et boost
+const DEFAULT_ITEM_EATEN_COUNT = 18; // correspond à 6 segments (18/3 = 6)
+const BOOST_ITEM_COST = 3;           // booster enlève 1 segment = 3 points
+const BOOST_INTERVAL_MS = 250;
+
 // --- Fonction de clamp pour contraindre la position ---
 function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
   return {
@@ -44,16 +49,20 @@ function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
 }
 
 // --- Fonctions utilitaires ---
+
 function randomItemRadius() {
   return Math.floor(Math.random() * (MAX_ITEM_RADIUS - MIN_ITEM_RADIUS + 1)) + MIN_ITEM_RADIUS;
 }
 
+// Pour que la croissance visuelle ne commence qu'au-dessus du score par défaut
 function getHeadRadius(player) {
-  return BASE_SIZE / 2 + player.itemEatenCount * 0.001;
+  // Taille de base : BASE_SIZE/2 = 10, puis on ajoute un supplément proportionnel (ici 0.05 par point dépassant 18)
+  return BASE_SIZE / 2 + Math.max(0, player.itemEatenCount - DEFAULT_ITEM_EATEN_COUNT) * 0.05;
 }
 
 function getSegmentRadius(player) {
-  return BASE_SIZE / 2 + player.itemEatenCount * 0.001;
+  // Les segments sont un peu plus petits (facteur 0.04)
+  return BASE_SIZE / 2 + Math.max(0, player.itemEatenCount - DEFAULT_ITEM_EATEN_COUNT) * 0.04;
 }
 
 function getPlayerCircles(player) {
@@ -118,10 +127,12 @@ function circlesCollide(circ1, circ2) {
   return Math.hypot(circ1.x - circ2.x, circ1.y - circ2.y) < (circ1.radius + circ2.radius);
 }
 
-// --- Modification dans dropQueueItems ---
-// On contraint la position générée pour qu'elle soit au moins 100px à l'intérieur du canvas.
+// --- Génération / Drop des Items ---
+
+// Lorsqu'on drop des items à partir de la queue, on contraint la position dans la zone jouable
 function dropQueueItems(player, roomId) {
   player.queue.forEach((segment, index) => {
+    // On drop 1 item sur 3 segments (comme dans votre code initial)
     if (index % 3 === 0) {
       const pos = clampPosition(segment.x, segment.y);
       const droppedItem = {
@@ -139,8 +150,7 @@ function dropQueueItems(player, roomId) {
   io.to(roomId).emit("update_items", roomsData[roomId].items);
 }
 
-// --- Modification de la génération initiale d'items ---
-// Les items sont placés dans la zone [100, width-100] et [100, height-100].
+// Les items initiaux sont générés à au moins 100px des bords
 function generateRandomItems(count, worldSize) {
   const items = [];
   for (let i = 0; i < count; i++) {
@@ -269,6 +279,7 @@ io.on("connection", (socket) => {
     const initialX = Math.random() * 800;
     const initialY = Math.random() * 600;
 
+    // Ici, le joueur commence avec itemEatenCount initial = DEFAULT_ITEM_EATEN_COUNT (soit 18) et 6 segments par défaut.
     roomsData[roomId].players[socket.id] = {
       x: initialX,
       y: initialY,
@@ -277,9 +288,9 @@ io.on("connection", (socket) => {
       direction: defaultDirection,
       boosting: false,
       color: randomColor,
-      pseudo: null,
-      itemEatenCount: 18,
-      queue: Array(5).fill({ x: initialX, y: initialY })
+      pseudo: null, // Sera défini via setPseudo
+      itemEatenCount: DEFAULT_ITEM_EATEN_COUNT, // 18 => 6 segments par défaut
+      queue: Array(6).fill({ x: initialX, y: initialY }) // 6 segments
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
     socket.join(roomId);
@@ -326,21 +337,21 @@ io.on("connection", (socket) => {
       console.log(`boostStart déclenché par ${socket.id}`);
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
-      if (player.queue.length <= 5) {
-        console.log(`boostStart impossible pour ${socket.id} car la queue est minimale.`);
+      // On autorise le boost seulement s'il y a plus que 6 segments (minimum)
+      if (player.queue.length <= 6) {
+        console.log(`boostStart impossible pour ${socket.id} car la queue est au minimum (6 segments).`);
         return;
       }
       if (player.boosting) return;
       
       // Retirer immédiatement un segment et le transformer en item
       const droppedSegment = player.queue.pop();
-      // Contrainte de position pour être à 100 px des bords
       const pos = clampPosition(droppedSegment.x, droppedSegment.y);
       const droppedItem = {
         id: `dropped-${Date.now()}`,
         x: pos.x,
         y: pos.y,
-        value: 6,
+        value: 6, // valeur de l'item (peut être ajustée)
         color: player.color,
         owner: socket.id,
         radius: MAX_ITEM_RADIUS,
@@ -348,20 +359,22 @@ io.on("connection", (socket) => {
       };
       roomsData[roomId].items.push(droppedItem);
       io.to(roomId).emit("update_items", roomsData[roomId].items);
-
-      if (player.itemEatenCount > 18) {
-        player.itemEatenCount = Math.max(18, player.itemEatenCount - 3);
+      
+      // Lors du boost, retirer 1 segment toutes les 250 ms en soustrayant BOOST_ITEM_COST (3 points)
+      if (player.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
+        player.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT, player.itemEatenCount - BOOST_ITEM_COST);
       }
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
-
-      if (player.queue.length === 5) {
+      
+      // Si après avoir retiré, la queue atteint 6, on arrête le boost
+      if (player.queue.length <= 6) {
         player.boosting = false;
         return;
       }
-
+      
       player.boosting = true;
       player.boostInterval = setInterval(() => {
-        if (player.queue.length > 5) {
+        if (player.queue.length > 6) {
           const droppedSegment = player.queue[player.queue.length - 1];
           const pos = clampPosition(droppedSegment.x, droppedSegment.y);
           const droppedItem = {
@@ -377,8 +390,8 @@ io.on("connection", (socket) => {
           roomsData[roomId].items.push(droppedItem);
           io.to(roomId).emit("update_items", roomsData[roomId].items);
           player.queue.pop();
-          if (player.itemEatenCount > 18) {
-            player.itemEatenCount = Math.max(50, player.itemEatenCount - 10);
+          if (player.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
+            player.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT, player.itemEatenCount - BOOST_ITEM_COST);
           } else {
             clearInterval(player.boostInterval);
             player.boosting = false;
@@ -389,8 +402,8 @@ io.on("connection", (socket) => {
           player.boosting = false;
           io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
         }
-      }, 250);
-
+      }, BOOST_INTERVAL_MS);
+      
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
     });
 
@@ -480,13 +493,15 @@ setInterval(() => {
     Object.entries(room.players).forEach(([id, player]) => {
       if (!player.direction) return;
       
+      // Enregistrement de la position actuelle dans l'historique
       player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
       if (player.positionHistory.length > 5000) {
         player.positionHistory.shift();
       }
       
-      const tailSpacing = getHeadRadius(player) * 0.4;
-      const desiredSegments = Math.floor(player.itemEatenCount / 3);
+      // Calcul de la queue : on fixe desiredSegments minimum à 6
+      const tailSpacing = getHeadRadius(player) * 0.5;
+      const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
       const newQueue = [];
       for (let i = 0; i < desiredSegments; i++) {
         const targetDistance = (i + 1) * tailSpacing;
@@ -526,7 +541,7 @@ setInterval(() => {
         if (circlesCollide(headCircle, itemCircle)) {
           const oldQueueLength = player.queue.length;
           player.itemEatenCount += item.value;
-          const targetQueueLength = Math.floor(player.itemEatenCount / 10);
+          const targetQueueLength = Math.max(6, Math.floor(player.itemEatenCount / 3));
           const segmentsToAdd = targetQueueLength - oldQueueLength;
           for (let j = 0; j < segmentsToAdd; j++) {
             if (player.queue.length === 0) {
