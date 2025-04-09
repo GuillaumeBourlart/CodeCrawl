@@ -513,21 +513,24 @@ setInterval(() => {
       }
       
       // Recalcul de la queue en appliquant le pattern du skin
-      const skinColors = player.skinColors || getDefaultSkinColors();
-      const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
-          ? skinColors
-          : getDefaultSkinColors();
-      const tailSpacing = getHeadRadius(player) * 0.2;
-      const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
-      const newQueue = [];
-      for (let i = 0; i < desiredSegments; i++) {
-        const targetDistance = (i + 1) * tailSpacing;
-        const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
-        // Pour la queue, on commence à appliquer les couleurs à partir de colors[1]
-        const segmentColor = colors[((i) % 19) + 1];
-        newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
-      }
-      player.queue = newQueue;
+      // Recalcul de la queue en appliquant le pattern du skin
+const skinColors = player.skinColors || getDefaultSkinColors();
+const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
+    ? skinColors
+    : getDefaultSkinColors();
+const tailSpacing = getHeadRadius(player) * 0.2;
+const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
+const newQueue = [];
+for (let i = 0; i < desiredSegments; i++) {
+  const targetDistance = (i + 1) * tailSpacing;
+  const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
+  // Pour la queue, on applique les couleurs à partir de colors[1]
+  const segmentColor = colors[((i) % 19) + 1];
+  newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
+}
+player.queue = newQueue;
+// Mise à jour de la couleur de la tête pour correspondre au skin (première couleur du pattern)
+player.color = colors[0];
       
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
       player.x += player.direction.x * speed;
