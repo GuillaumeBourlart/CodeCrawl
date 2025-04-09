@@ -349,8 +349,8 @@ io.on("connection", (socket) => {
       roomsData[roomId].items.push(droppedItem);
       io.to(roomId).emit("update_items", roomsData[roomId].items);
 
-      if (player.itemEatenCount > 50) {
-        player.itemEatenCount = Math.max(50, player.itemEatenCount - 10);
+      if (player.itemEatenCount > 18) {
+        player.itemEatenCount = Math.max(18, player.itemEatenCount - 3);
       }
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
 
@@ -485,7 +485,7 @@ setInterval(() => {
         player.positionHistory.shift();
       }
       
-      const tailSpacing = getHeadRadius(player) * 0.5;
+      const tailSpacing = getHeadRadius(player) * 0.4;
       const desiredSegments = Math.floor(player.itemEatenCount / 3);
       const newQueue = [];
       for (let i = 0; i < desiredSegments; i++) {
