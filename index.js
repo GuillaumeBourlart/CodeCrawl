@@ -152,7 +152,7 @@ function dropQueueItems(player, roomId) {
         y: pos.y,
         value: value,
         color: player.color,
-        radius: r),
+        radius: r,
         dropTime: Date.now()
       };
       roomsData[roomId].items.push(droppedItem);
