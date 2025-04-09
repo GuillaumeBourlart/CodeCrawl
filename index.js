@@ -500,7 +500,7 @@ setInterval(() => {
       }
       
       // Calcul de la queue : on fixe desiredSegments minimum à 6
-      const tailSpacing = getHeadRadius(player) * 0.5;
+      const tailSpacing = getHeadRadius(player) * 0.2;
       const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
       const newQueue = [];
       for (let i = 0; i < desiredSegments; i++) {
