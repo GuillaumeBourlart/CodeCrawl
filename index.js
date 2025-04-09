@@ -57,12 +57,12 @@ function randomItemRadius() {
 // Pour que la croissance visuelle ne commence qu'au-dessus du score par défaut
 function getHeadRadius(player) {
   // Taille de base : BASE_SIZE/2 = 10, puis on ajoute un supplément proportionnel (ici 0.05 par point dépassant 18)
-  return BASE_SIZE / 2 + Math.max(0, player.itemEatenCount - DEFAULT_ITEM_EATEN_COUNT) * 0.03;
+  return BASE_SIZE / 2 + Math.max(0, player.itemEatenCount - DEFAULT_ITEM_EATEN_COUNT) * 0.05;
 }
 
 function getSegmentRadius(player) {
   // Les segments sont un peu plus petits (facteur 0.04)
-  return BASE_SIZE / 2 + Math.max(0, player.itemEatenCount - DEFAULT_ITEM_EATEN_COUNT) * 0.03;
+  return BASE_SIZE / 2 + Math.max(0, player.itemEatenCount - DEFAULT_ITEM_EATEN_COUNT) * 0.05;
 }
 
 function getPlayerCircles(player) {
