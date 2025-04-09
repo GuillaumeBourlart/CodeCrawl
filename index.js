@@ -337,7 +337,7 @@ io.on("connection", (socket) => {
       player.boosting = false;
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
     }
-  }, 25);
+  }, 250);
 
   io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
 });
