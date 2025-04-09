@@ -61,18 +61,17 @@ async function getSkinDataFromDB(skin_id) {
     console.error("Erreur de récupération du skin :", error);
     return { colors: getDefaultSkinColors() };
   }
-  try {
-    const skin = JSON.parse(data.data_json);
-    if (!skin.colors || skin.colors.length !== 20) {
-      console.warn("Le skin récupéré ne contient pas 20 couleurs. Utilisation du skin par défaut.");
-      return { colors: getDefaultSkinColors() };
-    }
-    return skin;
-  } catch (e) {
-    console.error("Erreur de parsing du skin JSON :", e);
+  
+  // Puisque la colonne est de type jsonb, data.data est déjà un objet
+  const skin = data.data;
+  if (!skin.colors || skin.colors.length !== 20) {
+    console.warn("Le skin récupéré ne contient pas 20 couleurs. Utilisation du skin par défaut.");
     return { colors: getDefaultSkinColors() };
   }
+  
+  return skin;
 }
+
 function getDefaultSkinColors() {
   return [
     "#FF5733", "#33FF57", "#3357FF", "#FF33A8", "#33FFF5",
