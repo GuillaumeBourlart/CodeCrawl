@@ -48,7 +48,16 @@ function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
   };
 }
 
+
+
 // --- Fonctions utilitaires ---
+
+function getItemValue(radius) {
+  // Interpolation linéaire :
+  // value = 1 + ((radius - 4) / (10 - 4)) * (6 - 1)
+  return Math.round(1 + ((radius - MIN_ITEM_RADIUS) / (MAX_ITEM_RADIUS - MIN_ITEM_RADIUS)) * 5);
+}
+
 
 function randomItemRadius() {
   return Math.floor(Math.random() * (MAX_ITEM_RADIUS - MIN_ITEM_RADIUS + 1)) + MIN_ITEM_RADIUS;
@@ -134,14 +143,16 @@ function dropQueueItems(player, roomId) {
   player.queue.forEach((segment, index) => {
     // On drop 1 item sur 3 segments (comme dans votre code initial)
     if (index % 3 === 0) {
+      const r = randomItemRadius();
+      const value = getItemValue(r);
       const pos = clampPosition(segment.x, segment.y);
       const droppedItem = {
         id: `dropped-${Date.now()}-${Math.random()}`,
         x: pos.x,
         y: pos.y,
-        value: Math.floor(Math.random() * 5) + 1,
+        value: value,
         color: player.color,
-        radius: randomItemRadius(),
+        radius: r),
         dropTime: Date.now()
       };
       roomsData[roomId].items.push(droppedItem);
@@ -154,13 +165,15 @@ function dropQueueItems(player, roomId) {
 function generateRandomItems(count, worldSize) {
   const items = [];
   for (let i = 0; i < count; i++) {
+    const r = randomItemRadius();
+    const value = getItemValue(r);
     items.push({
       id: `item-${i}-${Date.now()}`,
       x: BOUNDARY_MARGIN + Math.random() * (worldSize.width - 2 * BOUNDARY_MARGIN),
       y: BOUNDARY_MARGIN + Math.random() * (worldSize.height - 2 * BOUNDARY_MARGIN),
-      value: Math.floor(Math.random() * 5) + 1,
+      value: value,
       color: itemColors[Math.floor(Math.random() * itemColors.length)],
-      radius: randomItemRadius()
+      radius: r
     });
   }
   return items;
@@ -346,15 +359,17 @@ io.on("connection", (socket) => {
       
       // Retirer immédiatement un segment et le transformer en item
       const droppedSegment = player.queue.pop();
+      const r = randomItemRadius();
+    const value = getItemValue(r);
       const pos = clampPosition(droppedSegment.x, droppedSegment.y);
       const droppedItem = {
         id: `dropped-${Date.now()}`,
         x: pos.x,
         y: pos.y,
-        value: 6, // valeur de l'item (peut être ajustée)
+        value: value, // valeur de l'item (peut être ajustée)
         color: player.color,
         owner: socket.id,
-        radius: MAX_ITEM_RADIUS,
+        radius: r,
         dropTime: Date.now()
       };
       roomsData[roomId].items.push(droppedItem);
@@ -377,14 +392,16 @@ io.on("connection", (socket) => {
         if (player.queue.length > 6) {
           const droppedSegment = player.queue[player.queue.length - 1];
           const pos = clampPosition(droppedSegment.x, droppedSegment.y);
+          const r = randomItemRadius();
+          const value = getItemValue(r);
           const droppedItem = {
             id: `dropped-${Date.now()}`,
             x: pos.x,
             y: pos.y,
-            value: 6,
+            value: value,
             color: player.color,
             owner: socket.id,
-            radius: MAX_ITEM_RADIUS,
+            radius: r,
             dropTime: Date.now()
           };
           roomsData[roomId].items.push(droppedItem);
@@ -554,13 +571,15 @@ setInterval(() => {
           room.items.splice(i, 1);
           i--;
           if (room.items.length < MAX_ITEMS) {
+            const r = randomItemRadius();
+            const value = getItemValue(r);
             const newItem = {
               id: `item-${Date.now()}`,
               x: BOUNDARY_MARGIN + Math.random() * (worldSize.width - 2 * BOUNDARY_MARGIN),
               y: BOUNDARY_MARGIN + Math.random() * (worldSize.height - 2 * BOUNDARY_MARGIN),
-              value: Math.floor(Math.random() * 5) + 1,
+              value: value,
               color: itemColors[Math.floor(Math.random() * itemColors.length)],
-              radius: randomItemRadius()
+              radius: r
             };
             room.items.push(newItem);
           }
