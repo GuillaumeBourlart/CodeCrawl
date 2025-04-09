@@ -146,13 +146,40 @@ const roomsData = {};
 // Cette fonction effectue un upsert sur la table "global_leaderboard"
 // avec l'id, le pseudo et le score du joueur.
 async function updateGlobalLeaderboard(playerId, score, pseudo) {
+  // Upsert : on insère ou on met à jour le score et le pseudo du joueur.
   const { data, error } = await supabase
     .from("global_leaderboard")
     .upsert([{ id: playerId, pseudo, score }]);
   if (error) {
     console.error("Erreur lors de la mise à jour du leaderboard global:", error);
+    return;
+  }
+
+  // Récupération des scores dans l'ordre décroissant, limitée aux 1000 meilleurs.
+  const { data: leaderboardData, error: selectError } = await supabase
+    .from("global_leaderboard")
+    .select("score")
+    .order("score", { ascending: false })
+    .limit(1000);
+  if (selectError) {
+    console.error("Erreur lors de la récupération du leaderboard pour le nettoyage:", selectError);
+    return;
+  }
+
+  // Si nous avons exactement 1000 entrées, on détermine la valeur seuil (score du 1000ᵉ).
+  if (leaderboardData.length === 1000) {
+    const threshold = leaderboardData[leaderboardData.length - 1].score;
+    // Supprimer les enregistrements dont le score est strictement inférieur au seuil.
+    const { error: deleteError } = await supabase
+      .from("global_leaderboard")
+      .delete()
+      .lt("score", threshold);
+    if (deleteError) {
+      console.error("Erreur lors du nettoyage du leaderboard global:", deleteError);
+    }
   }
 }
+
 
 // --- Recherche / création de room via Supabase ---
 async function findOrCreateRoom() {
