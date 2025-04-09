@@ -4,7 +4,6 @@ import { Server } from "socket.io";
 import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
 
-
 const { SUPABASE_URL = "", SUPABASE_ANON_KEY = "", PORT = 3000 } = process.env;
 console.log("SUPABASE_URL:", SUPABASE_URL);
 console.log("SUPABASE_ANON_KEY:", SUPABASE_ANON_KEY ? "<non-empty>" : "<EMPTY>");
@@ -13,7 +12,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
-app.use(cors({ origin: "*" })); // Ou préciser l'origine autorisée en production
+app.use(cors({ origin: "*" }));
 
 // --- Configuration ---
 const itemColors = [
@@ -31,9 +30,18 @@ const MIN_ITEM_RADIUS = 4;
 const MAX_ITEM_RADIUS = 10;
 
 const BASE_SIZE = 20; // Taille de base d'un cercle pour la tête
-const MAX_ITEMS = 300;
+const MAX_ITEMS = 600;
 const SPEED_NORMAL = 3.2;
 const SPEED_BOOST = 6.4;
+const BOUNDARY_MARGIN = 100; // Marge de 100px à respecter par rapport aux bords
+
+// --- Fonction de clamp pour contraindre la position ---
+function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
+  return {
+    x: Math.min(Math.max(x, margin), worldSize.width - margin),
+    y: Math.min(Math.max(y, margin), worldSize.height - margin)
+  };
+}
 
 // --- Fonctions utilitaires ---
 function randomItemRadius() {
@@ -110,13 +118,16 @@ function circlesCollide(circ1, circ2) {
   return Math.hypot(circ1.x - circ2.x, circ1.y - circ2.y) < (circ1.radius + circ2.radius);
 }
 
+// --- Modification dans dropQueueItems ---
+// On contraint la position générée pour qu'elle soit au moins 100px à l'intérieur du canvas.
 function dropQueueItems(player, roomId) {
   player.queue.forEach((segment, index) => {
     if (index % 3 === 0) {
+      const pos = clampPosition(segment.x, segment.y);
       const droppedItem = {
         id: `dropped-${Date.now()}-${Math.random()}`,
-        x: segment.x,
-        y: segment.y,
+        x: pos.x,
+        y: pos.y,
         value: Math.floor(Math.random() * 5) + 1,
         color: player.color,
         radius: randomItemRadius(),
@@ -128,13 +139,15 @@ function dropQueueItems(player, roomId) {
   io.to(roomId).emit("update_items", roomsData[roomId].items);
 }
 
+// --- Modification de la génération initiale d'items ---
+// Les items sont placés dans la zone [100, width-100] et [100, height-100].
 function generateRandomItems(count, worldSize) {
   const items = [];
   for (let i = 0; i < count; i++) {
     items.push({
       id: `item-${i}-${Date.now()}`,
-      x: Math.random() * worldSize.width,
-      y: Math.random() * worldSize.height,
+      x: BOUNDARY_MARGIN + Math.random() * (worldSize.width - 2 * BOUNDARY_MARGIN),
+      y: BOUNDARY_MARGIN + Math.random() * (worldSize.height - 2 * BOUNDARY_MARGIN),
       value: Math.floor(Math.random() * 5) + 1,
       color: itemColors[Math.floor(Math.random() * itemColors.length)],
       radius: randomItemRadius()
@@ -146,10 +159,7 @@ function generateRandomItems(count, worldSize) {
 const roomsData = {};
 
 // --- Mise à jour du leaderboard global avec Supabase ---
-// Cette fonction effectue un upsert sur la table "global_leaderboard"
-// avec l'id, le pseudo et le score du joueur.
 async function updateGlobalLeaderboard(playerId, score, pseudo) {
-  // Upsert : on insère ou on met à jour le score et le pseudo du joueur.
   const { data, error } = await supabase
     .from("global_leaderboard")
     .upsert([{ id: playerId, pseudo, score }]);
@@ -157,8 +167,6 @@ async function updateGlobalLeaderboard(playerId, score, pseudo) {
     console.error("Erreur lors de la mise à jour du leaderboard global:", error);
     return;
   }
-
-  // Récupération des scores dans l'ordre décroissant, limitée aux 1000 meilleurs.
   const { data: leaderboardData, error: selectError } = await supabase
     .from("global_leaderboard")
     .select("score")
@@ -168,11 +176,8 @@ async function updateGlobalLeaderboard(playerId, score, pseudo) {
     console.error("Erreur lors de la récupération du leaderboard pour le nettoyage:", selectError);
     return;
   }
-
-  // Si nous avons exactement 1000 entrées, on détermine la valeur seuil (score du 1000ᵉ).
   if (leaderboardData.length === 1000) {
     const threshold = leaderboardData[leaderboardData.length - 1].score;
-    // Supprimer les enregistrements dont le score est strictement inférieur au seuil.
     const { error: deleteError } = await supabase
       .from("global_leaderboard")
       .delete()
@@ -182,7 +187,6 @@ async function updateGlobalLeaderboard(playerId, score, pseudo) {
     }
   }
 }
-
 
 // --- Recherche / création de room via Supabase ---
 async function findOrCreateRoom() {
@@ -253,7 +257,6 @@ io.on("connection", (socket) => {
       };
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
-    // Initialisation du joueur avec une propriété "pseudo" qui sera défini plus tard
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -274,7 +277,7 @@ io.on("connection", (socket) => {
       direction: defaultDirection,
       boosting: false,
       color: randomColor,
-      pseudo: null,         // Ce champ sera mis à jour lorsque le joueur choisira son pseudo
+      pseudo: null,
       itemEatenCount: 50,
       queue: Array(5).fill({ x: initialX, y: initialY })
     };
@@ -284,7 +287,6 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
     io.to(roomId).emit("update_items", roomsData[roomId].items);
 
-    // Gestion de l'événement pour définir le pseudo du joueur
     socket.on("setPseudo", (data) => {
       const player = roomsData[roomId].players[socket.id];
       if (player && data.pseudo) {
@@ -332,10 +334,12 @@ io.on("connection", (socket) => {
       
       // Retirer immédiatement un segment et le transformer en item
       const droppedSegment = player.queue.pop();
+      // Contrainte de position pour être à 100 px des bords
+      const pos = clampPosition(droppedSegment.x, droppedSegment.y);
       const droppedItem = {
         id: `dropped-${Date.now()}`,
-        x: droppedSegment.x,
-        y: droppedSegment.y,
+        x: pos.x,
+        y: pos.y,
         value: 6,
         color: player.color,
         owner: socket.id,
@@ -359,10 +363,11 @@ io.on("connection", (socket) => {
       player.boostInterval = setInterval(() => {
         if (player.queue.length > 5) {
           const droppedSegment = player.queue[player.queue.length - 1];
+          const pos = clampPosition(droppedSegment.x, droppedSegment.y);
           const droppedItem = {
             id: `dropped-${Date.now()}`,
-            x: droppedSegment.x,
-            y: droppedSegment.y,
+            x: pos.x,
+            y: pos.y,
             value: 6,
             color: player.color,
             owner: socket.id,
@@ -406,7 +411,6 @@ io.on("connection", (socket) => {
       const player = roomsData[roomId].players[socket.id];
       if (player) {
         dropQueueItems(player, roomId);
-        // Mise à jour du leaderboard global en envoyant le pseudo
         updateGlobalLeaderboard(socket.id, player.itemEatenCount, player.pseudo || "Anonyme");
       }
       delete roomsData[roomId].players[socket.id];
@@ -476,13 +480,11 @@ setInterval(() => {
     Object.entries(room.players).forEach(([id, player]) => {
       if (!player.direction) return;
       
-      // Enregistrement de la position actuelle dans l'historique
       player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
       if (player.positionHistory.length > 5000) {
         player.positionHistory.shift();
       }
       
-      // Mise à jour de la queue basée sur l'historique
       const tailSpacing = getHeadRadius(player) * 0.4;
       const desiredSegments = Math.floor(player.itemEatenCount / 10);
       const newQueue = [];
@@ -493,12 +495,10 @@ setInterval(() => {
       }
       player.queue = newQueue;
       
-      // Mise à jour de la position de la tête
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
       player.x += player.direction.x * speed;
       player.y += player.direction.y * speed;
       
-      // Vérification des collisions avec les bordures
       const circles = getPlayerCircles(player);
       for (const c of circles) {
         if (
@@ -516,7 +516,6 @@ setInterval(() => {
         }
       }
       
-      // Collision avec les items
       const headCircle = { x: player.x, y: player.y, radius: getHeadRadius(player) };
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
@@ -542,8 +541,8 @@ setInterval(() => {
           if (room.items.length < MAX_ITEMS) {
             const newItem = {
               id: `item-${Date.now()}`,
-              x: Math.random() * worldSize.width,
-              y: Math.random() * worldSize.height,
+              x: BOUNDARY_MARGIN + Math.random() * (worldSize.width - 2 * BOUNDARY_MARGIN),
+              y: BOUNDARY_MARGIN + Math.random() * (worldSize.height - 2 * BOUNDARY_MARGIN),
               value: Math.floor(Math.random() * 5) + 1,
               color: itemColors[Math.floor(Math.random() * itemColors.length)],
               radius: randomItemRadius()
@@ -556,7 +555,6 @@ setInterval(() => {
       }
     });
     
-    // --- Calcul et émission du leaderboard pour la room ---
     const sortedPlayers = Object.entries(room.players)
       .sort(([, a], [, b]) => b.itemEatenCount - a.itemEatenCount);
     const top10 = sortedPlayers.slice(0, 10).map(([id, player]) => ({
