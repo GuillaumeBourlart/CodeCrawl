@@ -485,7 +485,7 @@ setInterval(() => {
         player.positionHistory.shift();
       }
       
-      const tailSpacing = getHeadRadius(player) * 0.4;
+      const tailSpacing = getHeadRadius(player) * 0.5;
       const desiredSegments = Math.floor(player.itemEatenCount / 3);
       const newQueue = [];
       for (let i = 0; i < desiredSegments; i++) {
