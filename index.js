@@ -49,11 +49,11 @@ function randomItemRadius() {
 }
 
 function getHeadRadius(player) {
-  return BASE_SIZE / 2 + player.itemEatenCount * 0.1 * 1.2;
+  return BASE_SIZE / 2 + player.itemEatenCount * 0.01 * 1.2;
 }
 
 function getSegmentRadius(player) {
-  return BASE_SIZE / 2 + player.itemEatenCount * 0.1;
+  return BASE_SIZE / 2 + player.itemEatenCount * 0.01;
 }
 
 function getPlayerCircles(player) {
