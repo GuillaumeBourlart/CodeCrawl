@@ -52,8 +52,8 @@ function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
 // La fonction renvoie un objet avec la propriété "colors" (un tableau de 20 couleurs)
 async function getSkinDataFromDB(skin_id) {
   const { data, error } = await supabase
-    .from("skins")
-    .select("data_json")
+    .from("game_skins")
+    .select("data")
     .eq("id", skin_id)
     .single();
   
