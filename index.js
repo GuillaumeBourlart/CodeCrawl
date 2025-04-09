@@ -278,7 +278,7 @@ io.on("connection", (socket) => {
       boosting: false,
       color: randomColor,
       pseudo: null,
-      itemEatenCount: 50,
+      itemEatenCount: 18,
       queue: Array(5).fill({ x: initialX, y: initialY })
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
@@ -377,7 +377,7 @@ io.on("connection", (socket) => {
           roomsData[roomId].items.push(droppedItem);
           io.to(roomId).emit("update_items", roomsData[roomId].items);
           player.queue.pop();
-          if (player.itemEatenCount > 50) {
+          if (player.itemEatenCount > 18) {
             player.itemEatenCount = Math.max(50, player.itemEatenCount - 10);
           } else {
             clearInterval(player.boostInterval);
