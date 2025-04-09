@@ -2,6 +2,8 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { createClient } from "@supabase/supabase-js";
+import cors from "cors";
+app.use(cors({ origin: "*" })); // Ou préciser l'origine autorisée en production
 
 const { SUPABASE_URL = "", SUPABASE_ANON_KEY = "", PORT = 3000 } = process.env;
 console.log("SUPABASE_URL:", SUPABASE_URL);
