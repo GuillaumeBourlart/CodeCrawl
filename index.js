@@ -116,6 +116,8 @@ function getPlayerCircles(player) {
   return circles;
 }
 
+
+
 function getPlayersForUpdate(players) {
   const result = {};
   Object.entries(players).forEach(([id, player]) => {
@@ -128,11 +130,14 @@ function getPlayersForUpdate(players) {
       length: BASE_SIZE,
       queue: player.queue,
       itemEatenCount: player.itemEatenCount,
-      skin_id: player.skin_id || null
+      skin_id: player.skin_id || null,
+      color: player.color,         // Ajouté pour transmettre la couleur de la tête
+      skinColors: player.skinColors  // Transmet le tableau complet si nécessaire côté client
     };
   });
   return result;
 }
+
 
 function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
