@@ -541,7 +541,7 @@ setInterval(() => {
         const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
         // Pour la queue, appliquer le pattern sur 20 couleurs :
         // La tête utilise colors[0] et pour la queue on utilise les couleurs de colors[1] à colors[19], qui se répètent.
-        const segmentColor = colors[((i) % 19) + 1];
+        const segmentColor = colors[i % 20];
         newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
       }
       player.queue = newQueue;
