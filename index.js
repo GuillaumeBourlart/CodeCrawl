@@ -56,6 +56,39 @@ function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
   };
 }
 
+async function findOrCreateRoom() {
+  let { data: existingRooms, error } = await supabase
+    .from("rooms")
+    .select("*")
+    .lt("current_players", 25)
+    .order("current_players", { ascending: true })
+    .limit(1);
+  if (error) {
+    console.error("Erreur Supabase (findOrCreateRoom):", error);
+    return null;
+  }
+  let room = (existingRooms && existingRooms.length > 0) ? existingRooms[0] : null;
+  if (!room) {
+    const { data: newRoomData, error: newRoomError } = await supabase
+      .from("rooms")
+      .insert([{ name: "New Room" }])
+      .select()
+      .single();
+    if (newRoomError) {
+      console.error("Erreur création room:", newRoomError);
+      return null;
+    }
+    room = newRoomData;
+  }
+  console.log(`Room trouvée/créée: ${room.id} avec ${room.current_players} joueurs.`);
+  await supabase
+    .from("rooms")
+    .update({ current_players: room.current_players + 1 })
+    .eq("id", room.id);
+  return room;
+}
+
+
 async function getSkinDataFromDB(skin_id) {
   const { data, error } = await supabase
     .from("game_skins")
