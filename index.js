@@ -3,18 +3,32 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
+import Stripe from "stripe";
 
-const { SUPABASE_URL = "", SUPABASE_ANON_KEY = "", PORT = 3000 } = process.env;
+// Variables d'environnement
+const {
+  SUPABASE_URL = "",
+  SUPABASE_ANON_KEY = "",
+  PORT = 3000,
+  STRIPE_SECRET_KEY = "",
+  STRIPE_WEBHOOK_SECRET = "",
+} = process.env;
 console.log("SUPABASE_URL:", SUPABASE_URL);
 console.log("SUPABASE_ANON_KEY:", SUPABASE_ANON_KEY ? "<non-empty>" : "<EMPTY>");
+
+// Initialisation Supabase et Stripe
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2022-11-15" });
 
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 app.use(cors({ origin: "*" }));
 
-// --- Configuration ---
+// Pour les endpoints JSON classiques
+app.use(express.json());
+
+// --- Configuration du jeu ---
 const itemColors = [
   "#FF5733",
   "#33FF57",
@@ -34,11 +48,12 @@ const SPEED_NORMAL = 3.2;
 const SPEED_BOOST = 6.4;
 const BOUNDARY_MARGIN = 100;
 
-const DEFAULT_ITEM_EATEN_COUNT = 18; // 18 => 6 segments par défaut
+const DEFAULT_ITEM_EATEN_COUNT = 18; // 6 segments par défaut
 const BOOST_ITEM_COST = 3;
 const BOOST_INTERVAL_MS = 250;
 
-// --- Fonction de clamp ---
+// --- Fonctions utilitaires et game logic ---
+
 function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
   return {
     x: Math.min(Math.max(x, margin), worldSize.width - margin),
@@ -46,26 +61,24 @@ function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
   };
 }
 
-// --- Récupération du skin depuis la DB ---
-// La colonne "data" (type jsonb) de la table "game_skins" contient un objet avec la propriété "colors" (un tableau de 20 couleurs).
 async function getSkinDataFromDB(skin_id) {
   const { data, error } = await supabase
     .from("game_skins")
-    .select("data")
+    .select("data, stripe_product_id")
     .eq("id", skin_id)
     .single();
 
   if (error || !data) {
     console.error("Erreur de récupération du skin :", error);
-    return getDefaultSkinColors();
+    return { colors: getDefaultSkinColors(), stripe_price_id: null };
   }
-  // La colonne "data" contient déjà l'objet JSON
+  // data.data contient l'objet JSON (avec colors)
   const skin = data.data;
   if (!skin || !skin.colors || skin.colors.length !== 20) {
     console.warn("Le skin récupéré ne contient pas 20 couleurs. Utilisation du skin par défaut.");
-    return getDefaultSkinColors();
+    return { colors: getDefaultSkinColors(), stripe_price_id: data.stripe_price_id };
   }
-  return skin.colors;
+  return { colors: skin.colors, stripe_price_id: data.stripe_price_id };
 }
 
 function getDefaultSkinColors() {
@@ -93,9 +106,6 @@ function getSegmentRadius(player) {
   return BASE_SIZE / 2 + Math.max(0, player.itemEatenCount - DEFAULT_ITEM_EATEN_COUNT) * 0.05;
 }
 
-// Retourne un tableau de "cercles" à dessiner pour le joueur.
-// La tête prend skinColors[0] et la queue se voit assigner, pour chaque segment de la queue, la couleur:
-// colors[((i) % 19) + 1] (les 19 couleurs restantes se répètent).
 function getPlayerCircles(player) {
   const skinColors = player.skinColors || getDefaultSkinColors();
   const circles = [];
@@ -110,13 +120,11 @@ function getPlayerCircles(player) {
       x: segment.x,
       y: segment.y,
       radius: getSegmentRadius(player),
-      color: segment.color // La couleur a été assignée lors du recalcul de la queue
+      color: segment.color
     });
   });
   return circles;
 }
-
-
 
 function getPlayersForUpdate(players) {
   const result = {};
@@ -131,13 +139,12 @@ function getPlayersForUpdate(players) {
       queue: player.queue,
       itemEatenCount: player.itemEatenCount,
       skin_id: player.skin_id || null,
-      color: player.color,         // Ajouté pour transmettre la couleur de la tête
-      skinColors: player.skinColors  // Transmet le tableau complet si nécessaire côté client
+      color: player.color,
+      skinColors: player.skinColors
     };
   });
   return result;
 }
-
 
 function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -166,9 +173,6 @@ function circlesCollide(circ1, circ2) {
   return Math.hypot(circ1.x - circ2.x, circ1.y - circ2.y) < (circ1.radius + circ2.radius);
 }
 
-// --- Gestion des items (drops / génération) ---
-// Lorsque des items sont drop (lors du boost ou du drop de la queue),
-// on utilise la couleur du segment correspondant.
 function dropQueueItems(player, roomId) {
   player.queue.forEach((segment, index) => {
     if (index % 3 === 0) {
@@ -180,7 +184,7 @@ function dropQueueItems(player, roomId) {
         x: pos.x,
         y: pos.y,
         value: value,
-        color: segment.color, // Couleur du segment
+        color: segment.color,
         radius: r,
         dropTime: Date.now()
       };
@@ -221,70 +225,105 @@ async function updateGlobalLeaderboard(playerId, score, pseudo) {
     .from("global_leaderboard")
     .select("score")
     .order("score", { ascending: false })
-    .limit(1000);
+    .limit(10);
   if (selectError) {
-    console.error("Erreur lors de la récupération du leaderboard pour le nettoyage:", selectError);
+    console.error("Erreur lors de la récupération du leaderboard:", selectError);
     return;
   }
-  if (leaderboardData.length === 1000) {
-    const threshold = leaderboardData[leaderboardData.length - 1].score;
-    const { error: deleteError } = await supabase
-      .from("global_leaderboard")
-      .delete()
-      .lt("score", threshold);
-    if (deleteError) {
-      console.error("Erreur lors du nettoyage du leaderboard global:", deleteError);
-    }
-  }
+  // Optionnel : nettoyer si besoin
 }
 
-async function findOrCreateRoom() {
-  let { data: existingRooms, error } = await supabase
-    .from("rooms")
-    .select("*")
-    .lt("current_players", 25)
-    .order("current_players", { ascending: true })
-    .limit(1);
-  if (error) {
-    console.error("Erreur Supabase (findOrCreateRoom):", error);
-    return null;
-  }
-  let room = (existingRooms && existingRooms.length > 0) ? existingRooms[0] : null;
-  if (!room) {
-    const { data: newRoomData, error: newRoomError } = await supabase
-      .from("rooms")
-      .insert([{ name: "New Room" }])
-      .select()
+// --- Endpoints Stripe ---
+
+// Endpoint pour créer une session de paiement
+app.post("/create-checkout-session", async (req, res) => {
+  try {
+    const { skin_id, user_id } = req.body; // Attendu dans le body
+    if (!skin_id || !user_id) {
+      return res.status(400).json({ error: "skin_id and user_id are required." });
+    }
+    // Récupérer le stripe_price_id depuis la table game_skins via Supabase
+    const { data: gameSkin, error } = await supabase
+      .from("game_skins")
+      .select("data, stripe_price_id")
+      .eq("id", skin_id)
       .single();
-    if (newRoomError) {
-      console.error("Erreur création room:", newRoomError);
-      return null;
-    }
-    room = newRoomData;
-  }
-  console.log(`Room trouvée/créée: ${room.id} avec ${room.current_players} joueurs.`);
-  await supabase
-    .from("rooms")
-    .update({ current_players: room.current_players + 1 })
-    .eq("id", room.id);
-  return room;
-}
 
-async function leaveRoom(roomId) {
-  if (!roomId) return;
-  const { data, error } = await supabase
-    .from("rooms")
-    .select("current_players")
-    .eq("id", roomId)
-    .single();
-  if (!data || error) {
-    console.error("Erreur lecture room (leaveRoom):", error);
-    return;
+    if (error || !gameSkin) {
+      return res.status(404).json({ error: "Skin not found." });
+    }
+
+    if (!gameSkin.stripe_price_id) {
+      return res.status(400).json({ error: "No Stripe price set for this skin." });
+    }
+
+    // Créer la session de paiement Stripe
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price: gameSkin.stripe_price_id,
+          quantity: 1,
+        },
+      ],
+      mode: "payment",
+      success_url: "https://votre-site.com/payment-success", // à adapter
+      cancel_url: "https://votre-site.com/payment-canceled",  // à adapter
+      metadata: {
+        user_id,
+        skin_id,
+      },
+    });
+    return res.json({ sessionId: session.id });
+  } catch (err) {
+    console.error("Erreur /create-checkout-session :", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
-  const newCount = Math.max(0, data.current_players - 1);
-  console.log(`Mise à jour du nombre de joueurs pour la room ${roomId}: ${newCount}`);
-  await supabase.from("rooms").update({ current_players: newCount }).eq("id", roomId);
-}
+});
+
+// Endpoint Webhook Stripe (utilise express.raw)
+app.post(
+  "/webhook-stripe",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    const sig = req.headers["stripe-signature"];
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        STRIPE_WEBHOOK_SECRET
+      );
+    } catch (err) {
+      console.error("Webhook signature verification failed.", err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    // Gérez l'événement checkout.session.completed
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object;
+      const { user_id, skin_id } = session.metadata;
+      // Mettre à jour la table user_skins dans Supabase pour enregistrer l'achat du skin
+      supabase
+        .from("user_skins")
+        .insert({
+          user_id,
+          skin_id,
+          purchased_at: new Date().toISOString(),
+        })
+        .then(({ error }) => {
+          if (error) {
+            console.error("Erreur insertion dans user_skins :", error);
+          } else {
+            console.log(`Skin ${skin_id} acheté par ${user_id} enregistré.`);
+          }
+        });
+    }
+    res.json({ received: true });
+  }
+);
+
+// --- Le reste de votre code existant (logique de game server) ---
 
 io.on("connection", (socket) => {
   console.log("Nouveau client connecté:", socket.id);
@@ -320,9 +359,9 @@ io.on("connection", (socket) => {
       positionHistory: [],
       direction: defaultDirection,
       boosting: false,
-      color: null,      // Définie via setPlayerInfo
-      pseudo: null,     // Définie via setPlayerInfo
-      skin_id: null,    // Définie via setPlayerInfo
+      color: null,
+      pseudo: null,
+      skin_id: null,
       itemEatenCount: DEFAULT_ITEM_EATEN_COUNT,
       queue: Array(6).fill({ x: Math.random() * 800, y: Math.random() * 600 })
     };
@@ -338,10 +377,10 @@ io.on("connection", (socket) => {
         player.pseudo = data.pseudo;
         player.skin_id = data.skin_id;
         // Récupération du skin depuis Supabase
-        const skinColors = await getSkinDataFromDB(player.skin_id);
-        player.skinColors = skinColors; // Tableau de 20 couleurs
+        const { colors } = await getSkinDataFromDB(player.skin_id);
+        player.skinColors = colors; // Tableau de 20 couleurs
         // La tête utilise la couleur 0 du pattern
-        player.color = skinColors[0];
+        player.color = colors[0];
       }
       console.log(`Infos définies pour ${socket.id}:`, data);
       io.to(roomId).emit("update_players", getPlayersForUpdate(roomsData[roomId].players));
@@ -520,16 +559,14 @@ setInterval(() => {
       }
     });
 
-    // Pour chaque joueur, recalcul de la queue en appliquant le pattern du skin
+    // Mise à jour de la queue pour chaque joueur
     Object.entries(room.players).forEach(([id, player]) => {
       if (!player.direction) return;
       player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
       if (player.positionHistory.length > 5000) {
         player.positionHistory.shift();
       }
-      // Récupération du tableau de couleurs du skin
       const skinColors = player.skinColors || getDefaultSkinColors();
-      // Assure-toi que le tableau contient bien 20 couleurs
       const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
         ? skinColors
         : getDefaultSkinColors();
@@ -539,13 +576,11 @@ setInterval(() => {
       for (let i = 0; i < desiredSegments; i++) {
         const targetDistance = (i + 1) * tailSpacing;
         const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
-        // Pour la queue, appliquer le pattern sur 20 couleurs :
-        // La tête utilise colors[0] et pour la queue on utilise les couleurs de colors[1] à colors[19], qui se répètent.
+        // Cycle sur les 20 couleurs (la tête étant colors[0])
         const segmentColor = colors[i % 20];
         newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
       }
       player.queue = newQueue;
-      // Mise à jour de la couleur de la tête pour qu'elle corresponde à colors[0]
       player.color = colors[0];
 
       const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
@@ -583,7 +618,6 @@ setInterval(() => {
               player.queue.push({ x: player.x, y: player.y, color: colors[1] });
             } else {
               const lastSeg = player.queue[player.queue.length - 1];
-              // Dupliquer le segment en gardant sa couleur
               player.queue.push({ x: lastSeg.x, y: lastSeg.y, color: lastSeg.color });
             }
           }
