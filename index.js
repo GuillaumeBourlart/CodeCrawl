@@ -371,8 +371,8 @@ io.on("connection", (socket) => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
       const { x, y } = data.direction;
-      const mag = Math.sqrt(x * x + y * y) || 1;
-      let newDir = { x: x / mag, y: y / mag };
+      const mag2 = Math.sqrt(x * x + y * y) || 1;
+      let newDir = { x: x / mag2, y: y / mag2 };
       const currentDir = player.direction;
       const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
       const clampedDot = Math.min(Math.max(dot, -1), 1);
@@ -482,7 +482,10 @@ io.on("connection", (socket) => {
   })();
 });
 
-// Boucle de mise à jour du jeu : collisions, récalc. de queue, etc.
+// -----------------------------------------------
+// Boucle de mise à jour du jeu : collisions, etc.
+// + LA "SOLUTION ULTIME" distance-based
+// -----------------------------------------------
 setInterval(() => {
   Object.keys(roomsData).forEach(roomId => {
     const room = roomsData[roomId];
@@ -532,71 +535,67 @@ setInterval(() => {
       p.positionHistory = [];
     });
 
-    // Recalcule la queue et applique le pattern du skin
+    // Recalcule la queue, applique le pattern du skin
     Object.entries(room.players).forEach(([id, player]) => {
       if (player.isSpectator) return;
       if (!player.direction) return;
 
-      // *** AJOUT/CHANGEMENT : Au lieu de pousser direct { x, y }, on subdivise si c'est trop grand ***
-
       // 1) On retient l'ancienne position
-const oldX = (player.positionHistory.length === 0)
-  ? player.x
-  : player.positionHistory[player.positionHistory.length - 1].x;
-const oldY = (player.positionHistory.length === 0)
-  ? player.y
-  : player.positionHistory[player.positionHistory.length - 1].y;
+      const oldX = (player.positionHistory.length === 0)
+        ? player.x
+        : player.positionHistory[player.positionHistory.length - 1].x;
+      const oldY = (player.positionHistory.length === 0)
+        ? player.y
+        : player.positionHistory[player.positionHistory.length - 1].y;
 
-// 2) On déplace la tête
-const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-player.x += player.direction.x * speed;
-player.y += player.direction.y * speed;
+      // 2) On calcule le déplacement
+      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
+      const newX = player.x + player.direction.x * speed;
+      const newY = player.y + player.direction.y * speed;
 
-// 3) On calcule la distance
-const distThisFrame = distance({ x: oldX, y: oldY }, { x: player.x, y: player.y });
+      // 3) Distance sur ce tick
+      const distThisFrame = distance({ x: oldX, y: oldY }, { x: newX, y: newY });
 
-// S'il n'y a pas encore de point dans l'historique, on ajoute la position de départ
-if (player.positionHistory.length === 0) {
-  player.positionHistory.push({ x: oldX, y: oldY });
-}
+      // Si pas de point dans l'historique => on en ajoute un
+      if (player.positionHistory.length === 0) {
+        player.positionHistory.push({ x: oldX, y: oldY });
+      }
 
-// 4) Subdivisions multiples si la distance est trop grande
-const normalDist = SPEED_NORMAL;  // distance "typique" en 16ms
-const maxAllowed = BOOST_DISTANCE_FACTOR * normalDist;
-// On calcule combien de segments "maxAllowed" on a besoin pour couvrir distThisFrame
-// Au minimum 1
-const factor = Math.ceil(distThisFrame / maxAllowed);
+      // *** AJOUT MULTIPLE-SUBDIVISIONS ***
+      // On calcule combien de fois "normalDist * BOOST_DISTANCE_FACTOR" rentre dans distThisFrame
+      const normalDist = SPEED_NORMAL;
+      const maxAllowed = BOOST_DISTANCE_FACTOR * normalDist;
+      const factor = Math.ceil(distThisFrame / maxAllowed);
 
-if (factor > 1) {
-  // On ajoute (factor - 1) points intermédiaires
-  // Exemple: si factor = 5, on crée 4 points, répartis uniformément
-  for (let i = 1; i < factor; i++) {
-    const subRatio = i / factor;
-    const subX = oldX + subRatio * (player.x - oldX);
-    const subY = oldY + subRatio * (player.y - oldY);
-    player.positionHistory.push({ x: subX, y: subY });
-  }
-}
+      // Subdivision
+      if (factor > 1) {
+        // On insère factor-1 points
+        for (let i = 1; i < factor; i++) {
+          const ratio = i / factor;
+          const midX = oldX + ratio * (newX - oldX);
+          const midY = oldY + ratio * (newY - oldY);
+          player.positionHistory.push({ x: midX, y: midY });
+        }
+      }
 
-// 5) On ajoute la position finale (tête)
-player.positionHistory.push({ x: player.x, y: player.y });
+      // Position finale
+      player.positionHistory.push({ x: newX, y: newY });
 
-// On limite la taille de l'historique
-if (player.positionHistory.length > 5000) {
-  player.positionHistory.shift();
-}
+      // On met à jour player.x, y
+      player.x = newX;
+      player.y = newY;
 
-// --- Suite du code identique ---
-// On applique ensuite getPositionAtDistance(...) pour construire la queue
-// On vérifie la sortie du monde, collisions items, etc.
+      // On limite la taille
+      if (player.positionHistory.length > 5000) {
+        player.positionHistory.shift();
+      }
 
-
+      // Construction de la queue
       const skinColors = player.skinColors || getDefaultSkinColors();
       const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
         ? skinColors
         : getDefaultSkinColors();
 
-      // On détermine l'espacement
       const tailSpacing = getHeadRadius(player) * 0.2;
       const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
       const newQueue = [];
@@ -609,8 +608,7 @@ if (player.positionHistory.length > 5000) {
       player.queue = newQueue;
       player.color = colors[0];
 
-      // *** On a déjà déplacé la tête plus haut, donc on n'ajoute pas "player.x += ..." ici.
-      // On n'oublie pas de vérifier la sortie du monde
+      // Check sortie du monde
       const headRadius = getHeadRadius(player);
       if (
         (player.x - headRadius < 0) ||
@@ -627,10 +625,11 @@ if (player.positionHistory.length > 5000) {
         return;
       }
 
-      // Collision items
+      // Collision avec items
       const headCircle = { x: player.x, y: player.y, radius: headRadius };
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
+        // Empêche de ré-avaler trop vite un item "boosté" par soi-même
         if (item.owner && item.owner === id) {
           if (Date.now() - item.dropTime < 500) continue;
         }
