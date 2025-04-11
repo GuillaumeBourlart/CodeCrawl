@@ -303,7 +303,6 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
 
 // ---------------------------------------------
 
-const app = express();
 const httpServer = createServer(app);
 io.on("connection", (socket) => {
   console.log("Nouveau client connecté:", socket.id);
