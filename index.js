@@ -40,7 +40,7 @@ const BOOST_INTERVAL_MS = 250;
 
 // On suppose ~16ms/tick => 60 FPS
 // On peut ajuster pour détecter un "gros saut" de la tête :
-const BOOST_DISTANCE_FACTOR = 1.7;  // Seuil, par ex. 1.7 * SPEED_NORMAL
+const BOOST_DISTANCE_FACTOR = 1.1;  // Seuil, par ex. 1.7 * SPEED_NORMAL
 
 // -- Constantes pour filtrer la zone visible --
 const VIEW_WIDTH = 1280;
