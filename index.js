@@ -39,9 +39,6 @@ const BOOST_ITEM_COST = 3;
 const BOOST_INTERVAL_MS = 250;
 
 // -- Constantes pour filtrer la zone visible --
-// Supposons qu'on considère un zoom PC fixe = 1.5, et un écran 1920×1080.
-// => zone visible ~ 1280×720 autour du joueur.
-// On peut ajuster si besoin.
 const VIEW_WIDTH = 1280;
 const VIEW_HEIGHT = 720;
 
@@ -145,8 +142,6 @@ function dropQueueItems(player, roomId) {
       roomsData[roomId].items.push(droppedItem);
     }
   });
-  // On ne fait plus d'envoi global "update_items",
-  // car dorénavant on enverra items filtrés dans la boucle setInterval (update_entities).
 }
 
 function generateRandomItems(count, worldSize) {
@@ -248,11 +243,8 @@ async function leaveRoom(roomId) {
     .eq("id", roomId);
 }
 
-
-
 // -- Fonctions utilitaires pour filtrer les entités visibles --
 function getVisibleItemsForPlayer(player, allItems) {
-  // On calcule le rectangle de vision autour du joueur
   const halfW = VIEW_WIDTH / 2;
   const halfH = VIEW_HEIGHT / 2;
   const minX = player.x - halfW;
@@ -260,19 +252,13 @@ function getVisibleItemsForPlayer(player, allItems) {
   const minY = player.y - halfH;
   const maxY = player.y + halfH;
 
-  // On renvoie seulement les items à l'intérieur (avec éventuellement une marge)
   return allItems.filter(item =>
     item.x >= minX && item.x <= maxX &&
     item.y >= minY && item.y <= maxY
   );
 }
 
-
-
-
-
 function getVisiblePlayersForPlayer(player, allPlayers) {
-  // On détermine le rectangle visible autour de "player" (celui qui reçoit les données)
   const halfW = VIEW_WIDTH / 2;
   const halfH = VIEW_HEIGHT / 2;
   const minX = player.x - halfW;
@@ -282,18 +268,16 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
 
   const result = {};
   Object.entries(allPlayers).forEach(([pid, otherPlayer]) => {
-    // Vérifie si la tête de l'autre joueur est visible
+    // On inclut tous les joueurs, actifs ou spectateurs, pour que le client puisse voir l’ensemble du jeu.
     const headIsVisible =
       otherPlayer.x >= minX && otherPlayer.x <= maxX &&
       otherPlayer.y >= minY && otherPlayer.y <= maxY;
 
-    // Filtre la queue pour ne garder que les segments dont la position est dans la zone visible
     const filteredQueue = otherPlayer.queue.filter(seg =>
       seg.x >= minX && seg.x <= maxX &&
       seg.y >= minY && seg.y <= maxY
     );
 
-    // Si la tête est visible ou s'il y a au moins un segment de queue visible, on renvoie cet objet
     if (headIsVisible || filteredQueue.length > 0) {
       result[pid] = {
         x: otherPlayer.x,
@@ -304,21 +288,14 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
         boosting: otherPlayer.boosting,
         direction: otherPlayer.direction,
         skin_id: otherPlayer.skin_id,
-        // On inclut la tête (même si elle est hors champ) et on ajoute
-        // uniquement les segments de queue qui sont réellement dans la zone visible.
         headVisible: headIsVisible,
         queue: filteredQueue,
+        isSpectator: !!otherPlayer.isSpectator  // Indique si le joueur est spectateur
       };
     }
   });
   return result;
 }
-
-
-
-
-
-// --------------------------------------------------------------
 
 io.on("connection", (socket) => {
   console.log("Nouveau client connecté:", socket.id);
@@ -347,7 +324,7 @@ io.on("connection", (socket) => {
     defaultDirection.x /= mag;
     defaultDirection.y /= mag;
 
-    // Initialisation du joueur
+    // Initialisation du joueur avec la propriété isSpectator ajoutée
     roomsData[roomId].players[socket.id] = {
       x: Math.random() * 800,
       y: Math.random() * 600,
@@ -359,14 +336,12 @@ io.on("connection", (socket) => {
       pseudo: null,
       skin_id: null,
       itemEatenCount: DEFAULT_ITEM_EATEN_COUNT,
-      queue: Array(6).fill({ x: Math.random() * 800, y: Math.random() * 600 })
+      queue: Array(6).fill({ x: Math.random() * 800, y: Math.random() * 600 }),
+      isSpectator: false  // Le joueur démarre en mode actif
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
 
     socket.join(roomId);
-
-    // On n'envoie plus "update_players" global, on attend la boucle setInterval.
-
     socket.emit("joined_room", { roomId });
 
     // Quand le client définit son pseudo/skin
@@ -376,17 +351,16 @@ io.on("connection", (socket) => {
         player.pseudo = data.pseudo;
         player.skin_id = data.skin_id;
         const skinColors = await getSkinDataFromDB(player.skin_id);
-        player.skinColors = skinColors; // Tableau de 20 couleurs
+        player.skinColors = skinColors;
         player.color = skinColors[0];
       }
       console.log(`Infos définies pour ${socket.id}:`, data);
-      // Pas d'envoi global, c'est la boucle setInterval qui gérera
     });
 
-    // Changement de direction
+    // Changement de direction (on ignore si le joueur est en mode spectateur)
     socket.on("changeDirection", (data) => {
       const player = roomsData[roomId].players[socket.id];
-      if (!player) return;
+      if (!player || player.isSpectator) return;
       const { x, y } = data.direction;
       const mag = Math.sqrt(x * x + y * y) || 1;
       let newDir = { x: x / mag, y: y / mag };
@@ -404,17 +378,15 @@ io.on("connection", (socket) => {
         };
       }
       player.direction = newDir;
-      // Idem, plus d'émission globale "update_players"
     });
 
-    // Boost
+    // Boost (on ne le traite pas si le joueur est en mode spectateur)
     socket.on("boostStart", () => {
       const player = roomsData[roomId].players[socket.id];
-      if (!player) return;
+      if (!player || player.isSpectator) return;
       if (player.queue.length <= 6) return;
       if (player.boosting) return;
 
-      // Retirer immédiatement un segment
       const droppedSegment = player.queue.pop();
       const r = randomItemRadius();
       const value = getItemValue(r);
@@ -442,7 +414,6 @@ io.on("connection", (socket) => {
         player.boosting = false;
         return;
       }
-      // Interval
       player.boosting = true;
       player.boostInterval = setInterval(() => {
         if (player.queue.length > 6) {
@@ -480,20 +451,23 @@ io.on("connection", (socket) => {
 
     socket.on("boostStop", () => {
       const player = roomsData[roomId].players[socket.id];
-      if (!player) return;
+      if (!player || player.isSpectator) return;
       if (player.boosting) {
         clearInterval(player.boostInterval);
         player.boosting = false;
       }
     });
 
+    // Lorsque le client envoie "player_eliminated"
+    // -> Le joueur passe en mode spectateur au lieu d'être supprimé
     socket.on("player_eliminated", () => {
       const player = roomsData[roomId].players[socket.id];
-      if (player) {
+      if (player && !player.isSpectator) {
         dropQueueItems(player, roomId);
         updateGlobalLeaderboard(socket.id, player.itemEatenCount, player.pseudo || "Anonyme");
+        player.isSpectator = true;  // Passage en mode spectateur
+        socket.emit("spectator_mode", { message: "Vous êtes maintenant en mode spectateur" });
       }
-      delete roomsData[roomId].players[socket.id];
     });
 
     socket.on("disconnect", async () => {
@@ -501,7 +475,7 @@ io.on("connection", (socket) => {
         const player = roomsData[roomId].players[socket.id];
         dropQueueItems(player, roomId);
         updateGlobalLeaderboard(socket.id, player.itemEatenCount, player.pseudo || "Anonyme");
-        delete roomsData[roomId].players[socket.id];
+        delete roomsData[roomId].players[socket.id]; // Suppression définitive lors du disconnect
       }
       await leaveRoom(roomId);
     });
@@ -515,13 +489,16 @@ setInterval(() => {
     const playerIds = Object.keys(room.players);
     const playersToEliminate = new Set();
 
-    // Collision entre joueurs
+    // --- Collision entre joueurs (on ignore les spectateurs) ---
     for (let i = 0; i < playerIds.length; i++) {
       for (let j = i + 1; j < playerIds.length; j++) {
         const id1 = playerIds[i], id2 = playerIds[j];
         const player1 = room.players[id1];
         const player2 = room.players[id2];
         if (!player1 || !player2) continue;
+        // Si l'un des joueurs est en mode spectateur, on ignore la collision
+        if (player1.isSpectator || player2.isSpectator) continue;
+
         const head1 = { x: player1.x, y: player1.y, radius: getHeadRadius(player1) };
         const head2 = { x: player2.x, y: player2.y, radius: getHeadRadius(player2) };
         if (circlesCollide(head1, head2)) {
@@ -529,7 +506,7 @@ setInterval(() => {
           playersToEliminate.add(id2);
           continue;
         }
-        // collision tête / queue
+        // Collision tête / queue
         for (const segment of player2.queue) {
           const segmentCircle = { x: segment.x, y: segment.y, radius: getSegmentRadius(player2) };
           if (circlesCollide(head1, segmentCircle)) {
@@ -547,127 +524,124 @@ setInterval(() => {
       }
     }
 
+    // Pour chaque joueur à éliminer (collision) : on passe en mode spectateur
     playersToEliminate.forEach(id => {
+      const player = room.players[id];
+      if (!player || player.isSpectator) return;
       io.to(id).emit("player_eliminated", { eliminatedBy: "collision" });
-      if (room.players[id]) {
-        dropQueueItems(room.players[id], roomId);
-        updateGlobalLeaderboard(id, room.players[id].itemEatenCount, room.players[id].pseudo || "Anonyme");
-        delete room.players[id];
-      }
+      dropQueueItems(player, roomId);
+      updateGlobalLeaderboard(id, player.itemEatenCount, player.pseudo || "Anonyme");
+      // Ne pas supprimer le joueur, mais le passer en mode spectateur
+      player.isSpectator = true;
+      io.to(id).emit("spectator_mode", { message: "Vous êtes maintenant en mode spectateur" });
     });
 
-    // Recalcule la queue et applique le pattern du skin
+    // --- Mise à jour individuelle des joueurs actifs (non spectateurs) ---
     Object.entries(room.players).forEach(([id, player]) => {
       if (!player.direction) return;
-      player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
-      if (player.positionHistory.length > 5000) {
-        player.positionHistory.shift();
-      }
-      const skinColors = player.skinColors || getDefaultSkinColors();
-      const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
-        ? skinColors
-        : getDefaultSkinColors();
 
-      const tailSpacing = getHeadRadius(player) * 0.2;
-      const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
-      const newQueue = [];
-      for (let i = 0; i < desiredSegments; i++) {
-        const targetDistance = (i + 1) * tailSpacing;
-        const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
-        const segmentColor = colors[i % 20];
-        newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
-      }
-      player.queue = newQueue;
-      player.color = colors[0];
-
-      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-      player.x += player.direction.x * speed;
-      player.y += player.direction.y * speed;
-
-      // Vérifier sortie du monde
-      const headRadius = getHeadRadius(player);
-      if (
-        (player.x - headRadius < 0) ||
-        (player.x + headRadius > worldSize.width) ||
-        (player.y - headRadius < 0) ||
-        (player.y + headRadius > worldSize.height)
-      ) {
-        io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
-        dropQueueItems(player, roomId);
-        updateGlobalLeaderboard(id, player.itemEatenCount, player.pseudo || "Anonyme");
-        delete room.players[id];
-        return;
-      }
-
-      // Collision avec items (tête)
-      const headCircle = { x: player.x, y: player.y, radius: headRadius };
-      for (let i = 0; i < room.items.length; i++) {
-        const item = room.items[i];
-        // Empêche de ré-avaler trop vite un item "boosté" par soi-même
-        if (item.owner && item.owner === id) {
-          if (Date.now() - item.dropTime < 500) continue;
+      if (!player.isSpectator) {
+        // On met à jour la position, l'historique et le snake uniquement pour les joueurs actifs
+        player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
+        if (player.positionHistory.length > 5000) {
+          player.positionHistory.shift();
         }
-        const itemCircle = { x: item.x, y: item.y, radius: item.radius };
-        if (circlesCollide(headCircle, itemCircle)) {
-          const oldQueueLength = player.queue.length;
-          player.itemEatenCount += item.value;
-          const targetQueueLength = Math.max(6, Math.floor(player.itemEatenCount / 3));
-          const segmentsToAdd = targetQueueLength - oldQueueLength;
-          for (let j = 0; j < segmentsToAdd; j++) {
-            if (player.queue.length === 0) {
-              player.queue.push({ x: player.x, y: player.y, color: colors[1] });
-            } else {
-              const lastSeg = player.queue[player.queue.length - 1];
-              player.queue.push({ x: lastSeg.x, y: lastSeg.y, color: lastSeg.color });
+        const skinColors = player.skinColors || getDefaultSkinColors();
+        const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
+          ? skinColors
+          : getDefaultSkinColors();
+
+        const tailSpacing = getHeadRadius(player) * 0.2;
+        const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
+        const newQueue = [];
+        for (let i = 0; i < desiredSegments; i++) {
+          const targetDistance = (i + 1) * tailSpacing;
+          const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
+          const segmentColor = colors[i % 20];
+          newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
+        }
+        player.queue = newQueue;
+        player.color = colors[0];
+
+        const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
+        player.x += player.direction.x * speed;
+        player.y += player.direction.y * speed;
+
+        // Vérifier sortie du monde
+        const headRadius = getHeadRadius(player);
+        if (
+          (player.x - headRadius < 0) ||
+          (player.x + headRadius > worldSize.width) ||
+          (player.y - headRadius < 0) ||
+          (player.y + headRadius > worldSize.height)
+        ) {
+          io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
+          dropQueueItems(player, roomId);
+          updateGlobalLeaderboard(id, player.itemEatenCount, player.pseudo || "Anonyme");
+          // Passage en mode spectateur au lieu de supprimer le joueur
+          player.isSpectator = true;
+          io.to(id).emit("spectator_mode", { message: "Vous êtes maintenant en mode spectateur" });
+          return;
+        }
+
+        // Collision avec items (tête)
+        const headCircle = { x: player.x, y: player.y, radius: headRadius };
+        for (let i = 0; i < room.items.length; i++) {
+          const item = room.items[i];
+          if (item.owner && item.owner === id) {
+            if (Date.now() - item.dropTime < 500) continue;
+          }
+          const itemCircle = { x: item.x, y: item.y, radius: item.radius };
+          if (circlesCollide(headCircle, itemCircle)) {
+            const oldQueueLength = player.queue.length;
+            player.itemEatenCount += item.value;
+            const targetQueueLength = Math.max(6, Math.floor(player.itemEatenCount / 3));
+            const segmentsToAdd = targetQueueLength - oldQueueLength;
+            for (let j = 0; j < segmentsToAdd; j++) {
+              if (player.queue.length === 0) {
+                player.queue.push({ x: player.x, y: player.y, color: colors[1] });
+              } else {
+                const lastSeg = player.queue[player.queue.length - 1];
+                player.queue.push({ x: lastSeg.x, y: lastSeg.y, color: lastSeg.color });
+              }
             }
-          }
-          room.items.splice(i, 1);
-          i--;
+            room.items.splice(i, 1);
+            i--;
 
-          // On génère un nouvel item si on descend en dessous du max
-          if (room.items.length < MAX_ITEMS) {
-            const r = randomItemRadius();
-            const value = getItemValue(r);
-            const newItem = {
-              id: `item-${Date.now()}`,
-              x: BOUNDARY_MARGIN + Math.random() * (worldSize.width - 2 * BOUNDARY_MARGIN),
-              y: BOUNDARY_MARGIN + Math.random() * (worldSize.height - 2 * BOUNDARY_MARGIN),
-              value: value,
-              color: itemColors[Math.floor(Math.random() * itemColors.length)],
-              radius: r
-            };
-            room.items.push(newItem);
+            if (room.items.length < MAX_ITEMS) {
+              const r = randomItemRadius();
+              const value = getItemValue(r);
+              const newItem = {
+                id: `item-${Date.now()}`,
+                x: BOUNDARY_MARGIN + Math.random() * (worldSize.width - 2 * BOUNDARY_MARGIN),
+                y: BOUNDARY_MARGIN + Math.random() * (worldSize.height - 2 * BOUNDARY_MARGIN),
+                value: value,
+                color: itemColors[Math.floor(Math.random() * itemColors.length)],
+                radius: r
+              };
+              room.items.push(newItem);
+            }
+            break;
           }
-          // Pas d'emit global d'items ici, on gère l'envoi filtré plus bas
-          break;
         }
       }
-    });
-
-    // Classement local (top 10)
-    const sortedPlayers = Object.entries(room.players)
-      .sort(([, a], [, b]) => b.itemEatenCount - a.itemEatenCount);
-    const top10 = sortedPlayers.slice(0, 10).map(([id, player]) => ({
-      id,
-      pseudo: player.pseudo || "Anonyme",
-      score: player.itemEatenCount,
-      color: player.color
-    }));
-
-    // -- Envoi individuel des entités visibles + leaderboard --
-    for (const pid of Object.keys(room.players)) {
-      const viewingPlayer = room.players[pid];
-      // Filtre des items
-      const visibleItems = getVisibleItemsForPlayer(viewingPlayer, room.items);
-      // Filtre des joueurs (avec queue partielle)
-      const visiblePlayers = getVisiblePlayersForPlayer(viewingPlayer, room.players);
-
-      io.to(pid).emit("update_entities", {
+      // Pour chaque joueur (actif ou spectateur), on envoie l'état visible (items, leaderboard, etc.)
+      const visibleItems = getVisibleItemsForPlayer(player, room.items);
+      const visiblePlayers = getVisiblePlayersForPlayer(player, room.players);
+      io.to(id).emit("update_entities", {
         players: visiblePlayers,
         items: visibleItems,
-        leaderboard: top10
+        leaderboard: Object.entries(room.players)
+          .map(([pid, p]) => ({
+            id: pid,
+            pseudo: p.pseudo || "Anonyme",
+            score: p.itemEatenCount,
+            color: p.color
+          }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 10)
       });
-    }
+    });
   });
 }, 16);
 
