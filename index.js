@@ -40,7 +40,7 @@ const BOOST_INTERVAL_MS = 250;
 
 // On suppose ~16ms/tick => 60 FPS
 // Seuil pour détecter un "gros saut" de la tête
-const BOOST_DISTANCE_FACTOR = 1;  // Toute variation supérieure à SPEED_NORMAL sera resamplée
+const BOOST_DISTANCE_FACTOR = 1;  
 
 // -- Constantes pour filtrer la zone visible --
 const VIEW_WIDTH = 1280;
@@ -104,31 +104,36 @@ function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-// --- Fonction d'interpolation Catmull–Rom ---
+// --- Interpolation par spline Catmull–Rom ---
 function catmullRomInterpolate(p0, p1, p2, p3, t) {
   const t2 = t * t;
   const t3 = t2 * t;
   return {
-    x: 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
-    y: 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
+    x: 0.5 * ((2 * p1.x) +
+         (-p0.x + p2.x) * t +
+         (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+         (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+    y: 0.5 * ((2 * p1.y) +
+         (-p0.y + p2.y) * t +
+         (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+         (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
   };
 }
 
-// --- Fonction de resample de la trajectoire par interpolation Catmull–Rom ---
-// Retourne un chemin uniformément espacé avec l’espacement défini (ex. tailSpacing)
+// --- Fonction de rééchantillonnage par interpolation spline ---
 function resampleTrajectoryCatmullRom(positionHistory, spacing) {
   if (positionHistory.length < 2) return positionHistory.slice();
 
-  // Étendre l'historique pour éviter des artefacts aux bords
+  // Extension du tableau pour éviter les artefacts aux bords
   const extended = [
     positionHistory[0],
     ...positionHistory,
     positionHistory[positionHistory.length - 1]
   ];
 
-  // Fine sampling avec Catmull-Rom pour générer un chemin continu
+  // Échantillonnage fin avec Catmull-Rom (20 sous-divisions par segment)
   let fine = [];
-  const steps = 20; // Nombre de sous-divisions par segment (peut être ajusté)
+  const steps = 20;
   for (let i = 1; i < extended.length - 2; i++) {
     for (let j = 0; j < steps; j++) {
       const t = j / steps;
@@ -139,18 +144,19 @@ function resampleTrajectoryCatmullRom(positionHistory, spacing) {
   // Ajouter le dernier point
   fine.push(extended[extended.length - 2]);
 
-  // Calcul de la distance cumulée entre les points de fine
+  // Calcul de la distance cumulée entre les points
   let cumDist = [0];
   for (let i = 1; i < fine.length; i++) {
     cumDist.push(cumDist[i - 1] + distance(fine[i - 1], fine[i]));
   }
   const totalLength = cumDist[cumDist.length - 1];
 
-  // Rééchantillonner le chemin fine pour obtenir des points espacés de "spacing"
+  // Rééchantillonnage : on prend des points espacés de "spacing"
   let resampled = [];
   for (let d = 0; d <= totalLength; d += spacing) {
     let idx = cumDist.findIndex(c => c >= d);
     if (idx === -1) idx = cumDist.length - 1;
+    if (idx <= 0) idx = 1; // Pour éviter d'accéder à un index négatif
     const t = (d - cumDist[idx - 1]) / (cumDist[idx] - cumDist[idx - 1]);
     const pt = {
       x: fine[idx - 1].x + t * (fine[idx].x - fine[idx - 1].x),
@@ -161,7 +167,7 @@ function resampleTrajectoryCatmullRom(positionHistory, spacing) {
   return resampled;
 }
 
-// --- Ancienne fonction getPositionAtDistance (restée pour compatibilité si besoin) ---
+// --- Ancienne fonction getPositionAtDistance (conservée pour compatibilité) ---
 function getPositionAtDistance(positionHistory, targetDistance) {
   let totalDistance = 0;
   for (let i = positionHistory.length - 1; i > 0; i--) {
@@ -391,7 +397,6 @@ io.on("connection", (socket) => {
       skin_id: null,
       itemEatenCount: DEFAULT_ITEM_EATEN_COUNT,
       queue: Array(6).fill({ x: Math.random() * 800, y: Math.random() * 600 }),
-      // Ajout d'un accumulateur de distance pour le resampling si besoin
       distAccumulator: 0
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
@@ -506,7 +511,7 @@ io.on("connection", (socket) => {
     });
   })();
 });
-
+ 
 // -----------------------------------------------
 // Boucle de mise à jour du jeu : collisions, resample et mise à jour de la queue
 // -----------------------------------------------
@@ -555,20 +560,20 @@ setInterval(() => {
       p.queue = [];
       p.positionHistory = [];
     });
-    // Mise à jour de la trajectoire et construction de la queue avec interpolation spline
+    // Mise à jour de la trajectoire et construction de la queue via interpolation spline
     Object.entries(room.players).forEach(([id, player]) => {
       if (player.isSpectator) return;
       if (!player.direction) return;
-      // -- Ajout de la position actuelle --
+      // Ajout de la position actuelle dans l'historique
       player.positionHistory.push({ x: player.x, y: player.y });
       if (player.positionHistory.length > 3000) {
         player.positionHistory.shift();
       }
-      // Calcul du tailSpacing en fonction de la tête
+      // Calcul de tailSpacing (espacement souhaité entre segments)
       const tailSpacing = getHeadRadius(player) * 0.2;
-      // Rééchantillonnage complet par interpolation Catmull–Rom
+      // Rééchantillonnage complet de la trajectoire via interpolation Catmull-Rom
       const uniformHistory = resampleTrajectoryCatmullRom(player.positionHistory, tailSpacing);
-      // Construction de la queue à partir du chemin uniformisé
+      // Reconstruction de la queue à partir du chemin uniformisé
       const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
       const skinColors = player.skinColors || getDefaultSkinColors();
       const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
