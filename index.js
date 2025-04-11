@@ -487,17 +487,17 @@ io.on("connection", (socket) => {
       }
     });
 
-    socket.on("player_eliminated", () => {
-      const player = roomsData[roomId].players[socket.id];
-      if (player) {
-        dropQueueItems(player, roomId);
-        updateGlobalLeaderboard(socket.id, player.itemEatenCount, player.pseudo || "Anonyme");
-      }
-      player.isSpectator = true;
-      player.queue = [];
-      player.positionHistory = [];
+    // socket.on("player_eliminated", () => {
+    //   const player = roomsData[roomId].players[socket.id];
+    //   if (player) {
+    //     dropQueueItems(player, roomId);
+    //     updateGlobalLeaderboard(socket.id, player.itemEatenCount, player.pseudo || "Anonyme");
+    //   }
+    //   player.isSpectator = true;
+    //   player.queue = [];
+    //   player.positionHistory = [];
 
-    });
+    // });
 
     socket.on("disconnect", async () => {
       if (roomsData[roomId]?.players[socket.id]) {
@@ -550,17 +550,26 @@ setInterval(() => {
       }
     }
 
-    playersToEliminate.forEach(id => {
-      io.to(id).emit("player_eliminated", { eliminatedBy: "collision" });
-      if (room.players[id]) {
-        dropQueueItems(room.players[id], roomId);
-        updateGlobalLeaderboard(id, room.players[id].itemEatenCount, room.players[id].pseudo || "Anonyme");
-        delete room.players[id];
-      }
-    });
+   playersToEliminate.forEach(id => {
+  io.to(id).emit("player_eliminated", { eliminatedBy: "collision" });
+  const p = room.players[id];
+  if (!p) return;
+  dropQueueItems(p, roomId);
+  updateGlobalLeaderboard(id, p.itemEatenCount, p.pseudo || "Anonyme");
+  
+  // Au lieu de delete room.players[id]:
+  p.isSpectator = true;
+  p.queue = [];
+  p.positionHistory = [];
+});
 
     // Recalcule la queue et applique le pattern du skin
     Object.entries(room.players).forEach(([id, player]) => {
+       if (player.isSpectator) {
+    // Ce joueur est en spectateur : pas de physique, pas de collision items
+    // Il recevra quand même update_entities plus loin
+    return;
+  }
       if (!player.direction) return;
       player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
       if (player.positionHistory.length > 5000) {
