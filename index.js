@@ -38,11 +38,14 @@ const DEFAULT_ITEM_EATEN_COUNT = 18; // 18 => 6 segments par défaut
 const BOOST_ITEM_COST = 3;
 const BOOST_INTERVAL_MS = 250;
 
-// Pour le champ de vision
+// -- Constantes pour filtrer la zone visible --
+// Supposons qu'on considère un zoom PC fixe = 1.5, et un écran 1920×1080.
+// => zone visible ~ 1280×720 autour du joueur.
+// On peut ajuster si besoin.
 const VIEW_WIDTH = 1280;
 const VIEW_HEIGHT = 720;
 
-// --- Fonctions utilitaires ---
+// --- Fonction de clamp ---
 function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
   return {
     x: Math.min(Math.max(x, margin), worldSize.width - margin),
@@ -50,6 +53,7 @@ function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
   };
 }
 
+// --- Récupération du skin depuis la DB ---
 async function getSkinDataFromDB(skin_id) {
   const { data, error } = await supabase
     .from("game_skins")
@@ -99,10 +103,6 @@ function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-/**
- * getPositionAtDistance: on remonte le history[] depuis la fin
- * et on cherche la position à targetDistance derrière la position la plus récente
- */
 function getPositionAtDistance(positionHistory, targetDistance) {
   let totalDistance = 0;
   for (let i = positionHistory.length - 1; i > 0; i--) {
@@ -126,7 +126,7 @@ function circlesCollide(circ1, circ2) {
   return Math.hypot(circ1.x - circ2.x, circ1.y - circ2.y) < (circ1.radius + circ2.radius);
 }
 
-// Items
+// --- Gestion des items (drops / génération) ---
 function dropQueueItems(player, roomId) {
   player.queue.forEach((segment, index) => {
     if (index % 3 === 0) {
@@ -145,6 +145,8 @@ function dropQueueItems(player, roomId) {
       roomsData[roomId].items.push(droppedItem);
     }
   });
+  // On ne fait plus d'envoi global "update_items",
+  // car dorénavant on enverra items filtrés dans la boucle setInterval (update_entities).
 }
 
 function generateRandomItems(count, worldSize) {
@@ -246,8 +248,11 @@ async function leaveRoom(roomId) {
     .eq("id", roomId);
 }
 
-// Filtrer les entités visibles
+
+
+// -- Fonctions utilitaires pour filtrer les entités visibles --
 function getVisibleItemsForPlayer(player, allItems) {
+  // On calcule le rectangle de vision autour du joueur
   const halfW = VIEW_WIDTH / 2;
   const halfH = VIEW_HEIGHT / 2;
   const minX = player.x - halfW;
@@ -255,13 +260,19 @@ function getVisibleItemsForPlayer(player, allItems) {
   const minY = player.y - halfH;
   const maxY = player.y + halfH;
 
+  // On renvoie seulement les items à l'intérieur (avec éventuellement une marge)
   return allItems.filter(item =>
     item.x >= minX && item.x <= maxX &&
     item.y >= minY && item.y <= maxY
   );
 }
 
+
+
+
+
 function getVisiblePlayersForPlayer(player, allPlayers) {
+  // On détermine le rectangle visible autour de "player" (celui qui reçoit les données)
   const halfW = VIEW_WIDTH / 2;
   const halfH = VIEW_HEIGHT / 2;
   const minX = player.x - halfW;
@@ -271,18 +282,20 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
 
   const result = {};
   Object.entries(allPlayers).forEach(([pid, otherPlayer]) => {
-    // On ignore les spectateurs
+    // Si le joueur est spectateur, on l’ignore
     if (otherPlayer.isSpectator) return;
-
+    // Vérifie si la tête de l'autre joueur est visible
     const headIsVisible =
       otherPlayer.x >= minX && otherPlayer.x <= maxX &&
       otherPlayer.y >= minY && otherPlayer.y <= maxY;
 
+    // Filtre la queue pour ne garder que les segments dont la position est dans la zone visible
     const filteredQueue = otherPlayer.queue.filter(seg =>
       seg.x >= minX && seg.x <= maxX &&
       seg.y >= minY && seg.y <= maxY
     );
 
+    // Si la tête est visible ou s'il y a au moins un segment de queue visible, on renvoie cet objet
     if (headIsVisible || filteredQueue.length > 0) {
       result[pid] = {
         x: otherPlayer.x,
@@ -293,6 +306,8 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
         boosting: otherPlayer.boosting,
         direction: otherPlayer.direction,
         skin_id: otherPlayer.skin_id,
+        // On inclut la tête (même si elle est hors champ) et on ajoute
+        // uniquement les segments de queue qui sont réellement dans la zone visible.
         headVisible: headIsVisible,
         queue: filteredQueue,
       };
@@ -301,10 +316,12 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
   return result;
 }
 
-// ---------------------------------------------
 
-const app = express();
-const httpServer = createServer(app);
+
+
+
+// --------------------------------------------------------------
+
 io.on("connection", (socket) => {
   console.log("Nouveau client connecté:", socket.id);
 
@@ -327,13 +344,12 @@ io.on("connection", (socket) => {
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
 
-    // Direction initiale aléatoire normalisée
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
     defaultDirection.y /= mag;
 
-    // Initialisation du joueur => AJOUT de distAccumulator, samplingStep, currentTailSpacing
+    // Initialisation du joueur
     roomsData[roomId].players[socket.id] = {
       x: Math.random() * 800,
       y: Math.random() * 600,
@@ -346,28 +362,28 @@ io.on("connection", (socket) => {
       isSpectator: false,
       skin_id: null,
       itemEatenCount: DEFAULT_ITEM_EATEN_COUNT,
-      queue: Array(6).fill({ x: Math.random() * 800, y: Math.random() * 600 }),
-
-      distAccumulator: 0,           // distance accumulée
-      samplingStep: 2,              // on enregistre un point d'historique tous les 2 px
-      currentTailSpacing: 0         // l'espacement lissé entre les segments
+      queue: Array(6).fill({ x: Math.random() * 800, y: Math.random() * 600 })
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
 
     socket.join(roomId);
+
+    // On n'envoie plus "update_players" global, on attend la boucle setInterval.
+
     socket.emit("joined_room", { roomId });
 
-    // setPlayerInfo => pseudo + skin
+    // Quand le client définit son pseudo/skin
     socket.on("setPlayerInfo", async (data) => {
       const player = roomsData[roomId].players[socket.id];
       if (player && data.pseudo && data.skin_id) {
         player.pseudo = data.pseudo;
         player.skin_id = data.skin_id;
         const skinColors = await getSkinDataFromDB(player.skin_id);
-        player.skinColors = skinColors;
+        player.skinColors = skinColors; // Tableau de 20 couleurs
         player.color = skinColors[0];
       }
       console.log(`Infos définies pour ${socket.id}:`, data);
+      // Pas d'envoi global, c'est la boucle setInterval qui gérera
     });
 
     // Changement de direction
@@ -375,10 +391,8 @@ io.on("connection", (socket) => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
       const { x, y } = data.direction;
-      const mag2 = Math.sqrt(x * x + y * y) || 1;
-      let newDir = { x: x / mag2, y: y / mag2 };
-
-      // Limite l'angle de rotation
+      const mag = Math.sqrt(x * x + y * y) || 1;
+      let newDir = { x: x / mag, y: y / mag };
       const currentDir = player.direction;
       const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
       const clampedDot = Math.min(Math.max(dot, -1), 1);
@@ -393,6 +407,7 @@ io.on("connection", (socket) => {
         };
       }
       player.direction = newDir;
+      // Idem, plus d'émission globale "update_players"
     });
 
     // Boost
@@ -402,7 +417,7 @@ io.on("connection", (socket) => {
       if (player.queue.length <= 6) return;
       if (player.boosting) return;
 
-      // Drop un segment
+      // Retirer immédiatement un segment
       const droppedSegment = player.queue.pop();
       const r = randomItemRadius();
       const value = getItemValue(r);
@@ -475,7 +490,18 @@ io.on("connection", (socket) => {
       }
     });
 
-    // Déconnexion
+    // socket.on("player_eliminated", () => {
+    //   const player = roomsData[roomId].players[socket.id];
+    //   if (player) {
+    //     dropQueueItems(player, roomId);
+    //     updateGlobalLeaderboard(socket.id, player.itemEatenCount, player.pseudo || "Anonyme");
+    //   }
+    //   player.isSpectator = true;
+    //   player.queue = [];
+    //   player.positionHistory = [];
+
+    // });
+
     socket.on("disconnect", async () => {
       if (roomsData[roomId]?.players[socket.id]) {
         const player = roomsData[roomId].players[socket.id];
@@ -488,7 +514,6 @@ io.on("connection", (socket) => {
   })();
 });
 
-// --------------------------------------------------------------
 // Boucle de mise à jour du jeu : collisions, récalc. de queue, etc.
 setInterval(() => {
   Object.keys(roomsData).forEach(roomId => {
@@ -496,36 +521,31 @@ setInterval(() => {
     const playerIds = Object.keys(room.players);
     const playersToEliminate = new Set();
 
-    // --- Détection des collisions joueurs
+    // Collision entre joueurs
     for (let i = 0; i < playerIds.length; i++) {
       for (let j = i + 1; j < playerIds.length; j++) {
         const id1 = playerIds[i], id2 = playerIds[j];
         const player1 = room.players[id1];
         const player2 = room.players[id2];
         if (!player1 || !player2) continue;
-        if (circlesCollide(
-          { x: player1.x, y: player1.y, radius: getHeadRadius(player1) },
-          { x: player2.x, y: player2.y, radius: getHeadRadius(player2) }
-        )) {
+        const head1 = { x: player1.x, y: player1.y, radius: getHeadRadius(player1) };
+        const head2 = { x: player2.x, y: player2.y, radius: getHeadRadius(player2) };
+        if (circlesCollide(head1, head2)) {
           playersToEliminate.add(id1);
           playersToEliminate.add(id2);
           continue;
         }
         // collision tête / queue
         for (const segment of player2.queue) {
-          if (circlesCollide(
-            { x: player1.x, y: player1.y, radius: getHeadRadius(player1) },
-            { x: segment.x, y: segment.y, radius: getSegmentRadius(player2) }
-          )) {
+          const segmentCircle = { x: segment.x, y: segment.y, radius: getSegmentRadius(player2) };
+          if (circlesCollide(head1, segmentCircle)) {
             playersToEliminate.add(id1);
             break;
           }
         }
         for (const segment of player1.queue) {
-          if (circlesCollide(
-            { x: player2.x, y: player2.y, radius: getHeadRadius(player2) },
-            { x: segment.x, y: segment.y, radius: getSegmentRadius(player1) }
-          )) {
+          const segmentCircle = { x: segment.x, y: segment.y, radius: getSegmentRadius(player1) };
+          if (circlesCollide(head2, segmentCircle)) {
             playersToEliminate.add(id2);
             break;
           }
@@ -533,96 +553,53 @@ setInterval(() => {
       }
     }
 
-    // Marquer comme spectateur ceux qui meurent
-    playersToEliminate.forEach(id => {
-      io.to(id).emit("player_eliminated", { eliminatedBy: "collision" });
-      const p = room.players[id];
-      if (!p) return;
-      dropQueueItems(p, roomId);
-      updateGlobalLeaderboard(id, p.itemEatenCount, p.pseudo || "Anonyme");
-      // Spectateur => on ne supprime pas, on vide queue + positionHistory
-      p.isSpectator = true;
-      p.queue = [];
-      p.positionHistory = [];
-    });
+   playersToEliminate.forEach(id => {
+  io.to(id).emit("player_eliminated", { eliminatedBy: "collision" });
+  const p = room.players[id];
+  if (!p) return;
+  dropQueueItems(p, roomId);
+  updateGlobalLeaderboard(id, p.itemEatenCount, p.pseudo || "Anonyme");
+  
+  // Au lieu de delete room.players[id]:
+  p.isSpectator = true;
+  p.queue = [];
+  p.positionHistory = [];
+});
 
-    // --- Mise à jour "physique" + queue
+    // Recalcule la queue et applique le pattern du skin
     Object.entries(room.players).forEach(([id, player]) => {
-      if (player.isSpectator) {
-        // Pas de logique de mouvement pour un spectateur
-        return;
-      }
+       if (player.isSpectator) {
+    // Ce joueur est en spectateur : pas de physique, pas de collision items
+    // Il recevra quand même update_entities plus loin
+    return;
+  }
       if (!player.direction) return;
-
-      // 1) Calcul de la nouvelle position (player.x/y) en fonction du speed
-      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-      const oldX = player.x, oldY = player.y;
-      player.x += player.direction.x * speed;
-      player.y += player.direction.y * speed;
-
-      // 2) Échantillonnage "distance-based" dans positionHistory
-      if (player.positionHistory.length === 0) {
-        player.positionHistory.push({ x: player.x, y: player.y });
-      } else {
-        const last = player.positionHistory[player.positionHistory.length - 1];
-        let dist = distance(last, { x: player.x, y: player.y });
-        player.distAccumulator += dist;
-
-        // On insère des points tant qu'on a dépassé samplingStep
-        while (player.distAccumulator >= player.samplingStep) {
-          const ratio = player.samplingStep / player.distAccumulator;
-          const newX = last.x + ratio * (player.x - last.x);
-          const newY = last.y + ratio * (player.y - last.y);
-
-          player.positionHistory.push({ x: newX, y: newY });
-          player.distAccumulator -= player.samplingStep;
-
-          // On fait "avancer" last.x, last.y
-          last.x = newX;
-          last.y = newY;
-        }
-      }
-
-      // On peut limiter la taille de l'historique
+      player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
       if (player.positionHistory.length > 5000) {
         player.positionHistory.shift();
       }
+      const skinColors = player.skinColors || getDefaultSkinColors();
+      const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
+        ? skinColors
+        : getDefaultSkinColors();
 
-      // 3) Lissage du tailSpacing
-      const rawTailSpacing = getHeadRadius(player) * 0.2;
-      if (!player.currentTailSpacing || player.currentTailSpacing <= 0) {
-        // Première initialisation
-        player.currentTailSpacing = rawTailSpacing;
-      } else {
-        // Lissage (90% ancienne valeur, 10% nouvelle)
-        player.currentTailSpacing = 0.9 * player.currentTailSpacing + 0.1 * rawTailSpacing;
-      }
-
-      // 4) Construction de la queue
+      const tailSpacing = getHeadRadius(player) * 0.2;
       const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
       const newQueue = [];
       for (let i = 0; i < desiredSegments; i++) {
-        const distFromHead = (i + 1) * player.currentTailSpacing;
-        const posAtDistance = getPositionAtDistance(player.positionHistory, distFromHead);
-
-        let segmentColor = "#FFFFFF";
-        if (player.skinColors) {
-          segmentColor = player.skinColors[i % player.skinColors.length];
-        }
-        newQueue.push({
-          x: posAtDistance.x,
-          y: posAtDistance.y,
-          color: segmentColor
-        });
+        const targetDistance = (i + 1) * tailSpacing;
+        const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
+        const segmentColor = colors[i % 20];
+        newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
       }
       player.queue = newQueue;
+      player.color = colors[0];
 
-      // Tête color
-      if (player.skinColors) {
-        player.color = player.skinColors[0];
-      }
+      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
+      player.x += player.direction.x * speed;
+      player.y += player.direction.y * speed;
 
-      // 5) Vérifier sortie du monde
+      // Vérifier sortie du monde
       const headRadius = getHeadRadius(player);
       if (
         (player.x - headRadius < 0) ||
@@ -636,14 +613,15 @@ setInterval(() => {
         player.isSpectator = true;
         player.queue = [];
         player.positionHistory = [];
+
         return;
       }
 
-      // 6) Collision avec items
+      // Collision avec items (tête)
       const headCircle = { x: player.x, y: player.y, radius: headRadius };
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
-        // Empêche de ré-avaler un item droppé par soi-même trop vite
+        // Empêche de ré-avaler trop vite un item "boosté" par soi-même
         if (item.owner && item.owner === id) {
           if (Date.now() - item.dropTime < 500) continue;
         }
@@ -651,12 +629,11 @@ setInterval(() => {
         if (circlesCollide(headCircle, itemCircle)) {
           const oldQueueLength = player.queue.length;
           player.itemEatenCount += item.value;
-
           const targetQueueLength = Math.max(6, Math.floor(player.itemEatenCount / 3));
           const segmentsToAdd = targetQueueLength - oldQueueLength;
           for (let j = 0; j < segmentsToAdd; j++) {
             if (player.queue.length === 0) {
-              player.queue.push({ x: player.x, y: player.y, color: "#FFFFFF" });
+              player.queue.push({ x: player.x, y: player.y, color: colors[1] });
             } else {
               const lastSeg = player.queue[player.queue.length - 1];
               player.queue.push({ x: lastSeg.x, y: lastSeg.y, color: lastSeg.color });
@@ -665,7 +642,7 @@ setInterval(() => {
           room.items.splice(i, 1);
           i--;
 
-          // Générer un nouvel item pour rester proche du max
+          // On génère un nouvel item si on descend en dessous du max
           if (room.items.length < MAX_ITEMS) {
             const r = randomItemRadius();
             const value = getItemValue(r);
@@ -679,12 +656,13 @@ setInterval(() => {
             };
             room.items.push(newItem);
           }
+          // Pas d'emit global d'items ici, on gère l'envoi filtré plus bas
           break;
         }
       }
     });
 
-    // --- Classement local (top 10)
+    // Classement local (top 10)
     const sortedPlayers = Object.entries(room.players)
       .sort(([, a], [, b]) => b.itemEatenCount - a.itemEatenCount);
     const top10 = sortedPlayers.slice(0, 10).map(([id, player]) => ({
@@ -694,10 +672,12 @@ setInterval(() => {
       color: player.color
     }));
 
-    // Envoi individuel (entities + leaderboard)
+    // -- Envoi individuel des entités visibles + leaderboard --
     for (const pid of Object.keys(room.players)) {
       const viewingPlayer = room.players[pid];
+      // Filtre des items
       const visibleItems = getVisibleItemsForPlayer(viewingPlayer, room.items);
+      // Filtre des joueurs (avec queue partielle)
       const visiblePlayers = getVisiblePlayersForPlayer(viewingPlayer, room.players);
 
       io.to(pid).emit("update_entities", {
