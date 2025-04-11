@@ -282,6 +282,8 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
 
   const result = {};
   Object.entries(allPlayers).forEach(([pid, otherPlayer]) => {
+    // Si le joueur est spectateur, on l’ignore
+    if (otherPlayer.isSpectator) return;
     // Vérifie si la tête de l'autre joueur est visible
     const headIsVisible =
       otherPlayer.x >= minX && otherPlayer.x <= maxX &&
