@@ -270,28 +270,29 @@ function getVisibleItemsForPlayer(player, allItems) {
 
 
 function getVisiblePlayersForPlayer(player, allPlayers) {
-  const VISIBLE_RADIUS = 100; // Ajuste la distance comme tu veux (50, 200, etc.)
+  // On détermine le rectangle visible autour de "player" (celui qui reçoit les données)
+  const halfW = VIEW_WIDTH / 2;
+  const halfH = VIEW_HEIGHT / 2;
+  const minX = player.x - halfW;
+  const maxX = player.x + halfW;
+  const minY = player.y - halfH;
+  const maxY = player.y + halfH;
+
   const result = {};
-
   Object.entries(allPlayers).forEach(([pid, otherPlayer]) => {
-    // Distance entre la tête du "viewer" (player) et la tête de otherPlayer
-    const dx = otherPlayer.x - player.x;
-    const dy = otherPlayer.y - player.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+    // Vérifie si la tête de l'autre joueur est visible
+    const headIsVisible =
+      otherPlayer.x >= minX && otherPlayer.x <= maxX &&
+      otherPlayer.y >= minY && otherPlayer.y <= maxY;
 
-    // Si la distance entre les deux joueurs est inférieure à VISIBLE_RADIUS,
-    // on décide de l'afficher. Sinon, on l'ignore complètement.
-    if (dist <= VISIBLE_RADIUS) {
-      // Ensuite, on filtre la queue de otherPlayer pour ne garder
-      // que les segments également proches de "player".
-      const partialQueue = otherPlayer.queue.filter(seg => {
-        const sdx = seg.x - player.x;
-        const sdy = seg.y - player.y;
-        const sdist = Math.sqrt(sdx * sdx + sdy * sdy);
-        return sdist <= VISIBLE_RADIUS;
-      });
+    // Filtre la queue pour ne garder que les segments dont la position est dans la zone visible
+    const filteredQueue = otherPlayer.queue.filter(seg =>
+      seg.x >= minX && seg.x <= maxX &&
+      seg.y >= minY && seg.y <= maxY
+    );
 
-      // On construit l'objet "visible" minimal
+    // Si la tête est visible ou s'il y a au moins un segment de queue visible, on renvoie cet objet
+    if (headIsVisible || filteredQueue.length > 0) {
       result[pid] = {
         x: otherPlayer.x,
         y: otherPlayer.y,
@@ -301,13 +302,16 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
         boosting: otherPlayer.boosting,
         direction: otherPlayer.direction,
         skin_id: otherPlayer.skin_id,
-        queue: partialQueue,
+        // On inclut la tête (même si elle est hors champ) et on ajoute
+        // uniquement les segments de queue qui sont réellement dans la zone visible.
+        headVisible: headIsVisible,
+        queue: filteredQueue,
       };
     }
   });
-
   return result;
 }
+
 
 
 
