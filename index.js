@@ -38,10 +38,11 @@ const DEFAULT_ITEM_EATEN_COUNT = 18; // 18 => 6 segments par défaut
 const BOOST_ITEM_COST = 3;
 const BOOST_INTERVAL_MS = 250;
 
+// On suppose ~16ms/tick => 60 FPS
+// On peut ajuster pour détecter un "gros saut" de la tête :
+const BOOST_DISTANCE_FACTOR = 1.7;  // Seuil, par ex. 1.7 * SPEED_NORMAL
+
 // -- Constantes pour filtrer la zone visible --
-// Supposons qu'on considère un zoom PC fixe = 1.5, et un écran 1920×1080.
-// => zone visible ~ 1280×720 autour du joueur.
-// On peut ajuster si besoin.
 const VIEW_WIDTH = 1280;
 const VIEW_HEIGHT = 720;
 
@@ -145,8 +146,6 @@ function dropQueueItems(player, roomId) {
       roomsData[roomId].items.push(droppedItem);
     }
   });
-  // On ne fait plus d'envoi global "update_items",
-  // car dorénavant on enverra items filtrés dans la boucle setInterval (update_entities).
 }
 
 function generateRandomItems(count, worldSize) {
@@ -248,11 +247,8 @@ async function leaveRoom(roomId) {
     .eq("id", roomId);
 }
 
-
-
 // -- Fonctions utilitaires pour filtrer les entités visibles --
 function getVisibleItemsForPlayer(player, allItems) {
-  // On calcule le rectangle de vision autour du joueur
   const halfW = VIEW_WIDTH / 2;
   const halfH = VIEW_HEIGHT / 2;
   const minX = player.x - halfW;
@@ -260,19 +256,13 @@ function getVisibleItemsForPlayer(player, allItems) {
   const minY = player.y - halfH;
   const maxY = player.y + halfH;
 
-  // On renvoie seulement les items à l'intérieur (avec éventuellement une marge)
   return allItems.filter(item =>
     item.x >= minX && item.x <= maxX &&
     item.y >= minY && item.y <= maxY
   );
 }
 
-
-
-
-
 function getVisiblePlayersForPlayer(player, allPlayers) {
-  // On détermine le rectangle visible autour de "player" (celui qui reçoit les données)
   const halfW = VIEW_WIDTH / 2;
   const halfH = VIEW_HEIGHT / 2;
   const minX = player.x - halfW;
@@ -282,20 +272,17 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
 
   const result = {};
   Object.entries(allPlayers).forEach(([pid, otherPlayer]) => {
-    // Si le joueur est spectateur, on l’ignore
     if (otherPlayer.isSpectator) return;
-    // Vérifie si la tête de l'autre joueur est visible
+
     const headIsVisible =
       otherPlayer.x >= minX && otherPlayer.x <= maxX &&
       otherPlayer.y >= minY && otherPlayer.y <= maxY;
 
-    // Filtre la queue pour ne garder que les segments dont la position est dans la zone visible
     const filteredQueue = otherPlayer.queue.filter(seg =>
       seg.x >= minX && seg.x <= maxX &&
       seg.y >= minY && seg.y <= maxY
     );
 
-    // Si la tête est visible ou s'il y a au moins un segment de queue visible, on renvoie cet objet
     if (headIsVisible || filteredQueue.length > 0) {
       result[pid] = {
         x: otherPlayer.x,
@@ -306,8 +293,6 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
         boosting: otherPlayer.boosting,
         direction: otherPlayer.direction,
         skin_id: otherPlayer.skin_id,
-        // On inclut la tête (même si elle est hors champ) et on ajoute
-        // uniquement les segments de queue qui sont réellement dans la zone visible.
         headVisible: headIsVisible,
         queue: filteredQueue,
       };
@@ -316,11 +301,11 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
   return result;
 }
 
-
-
-
-
 // --------------------------------------------------------------
+
+const httpServer = createServer(app);
+const io = new Server(httpServer, { cors: { origin: "*" } });
+app.use(cors({ origin: "*" }));
 
 io.on("connection", (socket) => {
   console.log("Nouveau client connecté:", socket.id);
@@ -344,6 +329,7 @@ io.on("connection", (socket) => {
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
 
+    // Direction aléatoire
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
@@ -367,23 +353,19 @@ io.on("connection", (socket) => {
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
 
     socket.join(roomId);
-
-    // On n'envoie plus "update_players" global, on attend la boucle setInterval.
-
     socket.emit("joined_room", { roomId });
 
-    // Quand le client définit son pseudo/skin
+    // setPlayerInfo
     socket.on("setPlayerInfo", async (data) => {
       const player = roomsData[roomId].players[socket.id];
       if (player && data.pseudo && data.skin_id) {
         player.pseudo = data.pseudo;
         player.skin_id = data.skin_id;
         const skinColors = await getSkinDataFromDB(player.skin_id);
-        player.skinColors = skinColors; // Tableau de 20 couleurs
+        player.skinColors = skinColors;
         player.color = skinColors[0];
       }
       console.log(`Infos définies pour ${socket.id}:`, data);
-      // Pas d'envoi global, c'est la boucle setInterval qui gérera
     });
 
     // Changement de direction
@@ -407,7 +389,6 @@ io.on("connection", (socket) => {
         };
       }
       player.direction = newDir;
-      // Idem, plus d'émission globale "update_players"
     });
 
     // Boost
@@ -490,18 +471,7 @@ io.on("connection", (socket) => {
       }
     });
 
-    // socket.on("player_eliminated", () => {
-    //   const player = roomsData[roomId].players[socket.id];
-    //   if (player) {
-    //     dropQueueItems(player, roomId);
-    //     updateGlobalLeaderboard(socket.id, player.itemEatenCount, player.pseudo || "Anonyme");
-    //   }
-    //   player.isSpectator = true;
-    //   player.queue = [];
-    //   player.positionHistory = [];
-
-    // });
-
+    // Déconnexion
     socket.on("disconnect", async () => {
       if (roomsData[roomId]?.players[socket.id]) {
         const player = roomsData[roomId].players[socket.id];
@@ -553,36 +523,67 @@ setInterval(() => {
       }
     }
 
-   playersToEliminate.forEach(id => {
-  io.to(id).emit("player_eliminated", { eliminatedBy: "collision" });
-  const p = room.players[id];
-  if (!p) return;
-  dropQueueItems(p, roomId);
-  updateGlobalLeaderboard(id, p.itemEatenCount, p.pseudo || "Anonyme");
-  
-  // Au lieu de delete room.players[id]:
-  p.isSpectator = true;
-  p.queue = [];
-  p.positionHistory = [];
-});
+    playersToEliminate.forEach(id => {
+      io.to(id).emit("player_eliminated", { eliminatedBy: "collision" });
+      const p = room.players[id];
+      if (!p) return;
+      dropQueueItems(p, roomId);
+      updateGlobalLeaderboard(id, p.itemEatenCount, p.pseudo || "Anonyme");
+      p.isSpectator = true;
+      p.queue = [];
+      p.positionHistory = [];
+    });
 
     // Recalcule la queue et applique le pattern du skin
     Object.entries(room.players).forEach(([id, player]) => {
-       if (player.isSpectator) {
-    // Ce joueur est en spectateur : pas de physique, pas de collision items
-    // Il recevra quand même update_entities plus loin
-    return;
-  }
+      if (player.isSpectator) return;
       if (!player.direction) return;
-      player.positionHistory.push({ x: player.x, y: player.y, time: Date.now() });
+
+      // *** AJOUT/CHANGEMENT : Au lieu de pousser direct { x, y }, on subdivise si c'est trop grand ***
+
+      // 1) on retient l'ancienne position
+      const oldX = (player.positionHistory.length === 0)
+        ? player.x
+        : player.positionHistory[player.positionHistory.length - 1].x;
+      const oldY = (player.positionHistory.length === 0)
+        ? player.y
+        : player.positionHistory[player.positionHistory.length - 1].y;
+
+      // 2) on déplace la tête (ce code existait déjà plus bas, on peut le remonter)
+      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
+      player.x += player.direction.x * speed;
+      player.y += player.direction.y * speed;
+
+      // 3) on calcule la distance
+      const distThisFrame = distance({ x: oldX, y: oldY }, { x: player.x, y: player.y });
+      if (player.positionHistory.length === 0) {
+        // S'il n'y a pas de point dans l'historique, on push direct la position de départ
+        player.positionHistory.push({ x: oldX, y: oldY });
+      }
+
+      // 4) si la distance est anormalement grande => on insère un point "mi-chemin"
+      const normalDist = SPEED_NORMAL; // distance "typique" en 16ms
+      if (distThisFrame > BOOST_DISTANCE_FACTOR * normalDist) {
+        // on calcule la position médiane
+        const midX = oldX + 0.5 * (player.x - oldX);
+        const midY = oldY + 0.5 * (player.y - oldY);
+        player.positionHistory.push({ x: midX, y: midY });
+      }
+
+      // 5) on ajoute la position finale
+      player.positionHistory.push({ x: player.x, y: player.y });
+
+      // On limite la taille de l'historique
       if (player.positionHistory.length > 5000) {
         player.positionHistory.shift();
       }
+
       const skinColors = player.skinColors || getDefaultSkinColors();
       const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
         ? skinColors
         : getDefaultSkinColors();
 
+      // On détermine l'espacement
       const tailSpacing = getHeadRadius(player) * 0.2;
       const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
       const newQueue = [];
@@ -595,11 +596,8 @@ setInterval(() => {
       player.queue = newQueue;
       player.color = colors[0];
 
-      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-      player.x += player.direction.x * speed;
-      player.y += player.direction.y * speed;
-
-      // Vérifier sortie du monde
+      // *** On a déjà déplacé la tête plus haut, donc on n'ajoute pas "player.x += ..." ici.
+      // On n'oublie pas de vérifier la sortie du monde
       const headRadius = getHeadRadius(player);
       if (
         (player.x - headRadius < 0) ||
@@ -613,15 +611,13 @@ setInterval(() => {
         player.isSpectator = true;
         player.queue = [];
         player.positionHistory = [];
-
         return;
       }
 
-      // Collision avec items (tête)
+      // Collision items
       const headCircle = { x: player.x, y: player.y, radius: headRadius };
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
-        // Empêche de ré-avaler trop vite un item "boosté" par soi-même
         if (item.owner && item.owner === id) {
           if (Date.now() - item.dropTime < 500) continue;
         }
@@ -642,7 +638,6 @@ setInterval(() => {
           room.items.splice(i, 1);
           i--;
 
-          // On génère un nouvel item si on descend en dessous du max
           if (room.items.length < MAX_ITEMS) {
             const r = randomItemRadius();
             const value = getItemValue(r);
@@ -656,7 +651,6 @@ setInterval(() => {
             };
             room.items.push(newItem);
           }
-          // Pas d'emit global d'items ici, on gère l'envoi filtré plus bas
           break;
         }
       }
@@ -672,12 +666,10 @@ setInterval(() => {
       color: player.color
     }));
 
-    // -- Envoi individuel des entités visibles + leaderboard --
+    // Envoi individuel
     for (const pid of Object.keys(room.players)) {
       const viewingPlayer = room.players[pid];
-      // Filtre des items
       const visibleItems = getVisibleItemsForPlayer(viewingPlayer, room.items);
-      // Filtre des joueurs (avec queue partielle)
       const visiblePlayers = getVisiblePlayersForPlayer(viewingPlayer, room.players);
 
       io.to(pid).emit("update_entities", {
