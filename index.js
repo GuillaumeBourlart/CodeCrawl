@@ -248,22 +248,19 @@ async function leaveRoom(roomId) {
     .eq("id", roomId);
 }
 
-// -- Fonctions utilitaires pour filtrer les entités visibles --
-function getVisibleItemsForPlayer(player, allItems) {
-  // On calcule le rectangle de vision autour du joueur
-  const halfW = VIEW_WIDTH / 2;
-  const halfH = VIEW_HEIGHT / 2;
-  const minX = player.x - halfW;
-  const maxX = player.x + halfW;
-  const minY = player.y - halfH;
-  const maxY = player.y + halfH;
 
-  // On renvoie seulement les items à l'intérieur (avec éventuellement une marge)
-  return allItems.filter(item =>
-    item.x >= minX && item.x <= maxX &&
-    item.y >= minY && item.y <= maxY
-  );
+
+function getVisibleItemsForPlayer(player, allItems) {
+  const RADIUS = 100; // Ajuste la distance comme tu veux (50, 200, etc.)
+
+  return allItems.filter(item => {
+    const dx = item.x - player.x;
+    const dy = item.y - player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy); // distance Euclidienne
+    return dist <= RADIUS;
+  });
 }
+
 
 function getVisiblePlayersForPlayer(player, allPlayers) {
   // Même logique : on détermine un rectangle de vision
