@@ -269,29 +269,21 @@ function getVisibleItemsForPlayer(player, allItems) {
 
 
 
+
 function getVisiblePlayersForPlayer(player, allPlayers) {
-  // On détermine le rectangle visible autour de "player" (celui qui reçoit les données)
-  const halfW = VIEW_WIDTH / 2;
-  const halfH = VIEW_HEIGHT / 2;
-  const minX = player.x - halfW;
-  const maxX = player.x + halfW;
-  const minY = player.y - halfH;
-  const maxY = player.y + halfH;
-
+  const VISIBLE_RADIUS = 100; // Rayon en pixels pour déterminer la visibilité
   const result = {};
-  Object.entries(allPlayers).forEach(([pid, otherPlayer]) => {
-    // Vérifie si la tête de l'autre joueur est visible
-    const headIsVisible =
-      otherPlayer.x >= minX && otherPlayer.x <= maxX &&
-      otherPlayer.y >= minY && otherPlayer.y <= maxY;
 
-    // Filtre la queue pour ne garder que les segments dont la position est dans la zone visible
+  Object.entries(allPlayers).forEach(([pid, otherPlayer]) => {
+    // Vérifie si la tête de l'autre joueur est dans le cercle de rayon VISIBLE_RADIUS autour de "player"
+    const headIsVisible = distance(player, otherPlayer) <= VISIBLE_RADIUS;
+
+    // Filtre la queue en retenant uniquement les segments dont la distance depuis "player" est inférieure ou égale à VISIBLE_RADIUS
     const filteredQueue = otherPlayer.queue.filter(seg =>
-      seg.x >= minX && seg.x <= maxX &&
-      seg.y >= minY && seg.y <= maxY
+      distance(player, seg) <= VISIBLE_RADIUS
     );
 
-    // Si la tête est visible ou s'il y a au moins un segment de queue visible, on renvoie cet objet
+    // Si la tête est visible ou s'il y a au moins un segment visible dans la queue, on inclut cet autre joueur
     if (headIsVisible || filteredQueue.length > 0) {
       result[pid] = {
         x: otherPlayer.x,
@@ -302,15 +294,15 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
         boosting: otherPlayer.boosting,
         direction: otherPlayer.direction,
         skin_id: otherPlayer.skin_id,
-        // On inclut la tête (même si elle est hors champ) et on ajoute
-        // uniquement les segments de queue qui sont réellement dans la zone visible.
         headVisible: headIsVisible,
         queue: filteredQueue,
       };
     }
   });
+  
   return result;
 }
+
 
 
 
