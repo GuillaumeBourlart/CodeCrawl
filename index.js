@@ -303,7 +303,6 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
 
 // --------------------------------------------------------------
 
-const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 app.use(cors({ origin: "*" }));
 
