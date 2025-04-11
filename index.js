@@ -357,6 +357,7 @@ io.on("connection", (socket) => {
       boosting: false,
       color: null,
       pseudo: null,
+      isSpectator: false,
       skin_id: null,
       itemEatenCount: DEFAULT_ITEM_EATEN_COUNT,
       queue: Array(6).fill({ x: Math.random() * 800, y: Math.random() * 600 })
