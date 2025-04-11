@@ -539,42 +539,57 @@ setInterval(() => {
 
       // *** AJOUT/CHANGEMENT : Au lieu de pousser direct { x, y }, on subdivise si c'est trop grand ***
 
-      // 1) on retient l'ancienne position
-      const oldX = (player.positionHistory.length === 0)
-        ? player.x
-        : player.positionHistory[player.positionHistory.length - 1].x;
-      const oldY = (player.positionHistory.length === 0)
-        ? player.y
-        : player.positionHistory[player.positionHistory.length - 1].y;
+      // 1) On retient l'ancienne position
+const oldX = (player.positionHistory.length === 0)
+  ? player.x
+  : player.positionHistory[player.positionHistory.length - 1].x;
+const oldY = (player.positionHistory.length === 0)
+  ? player.y
+  : player.positionHistory[player.positionHistory.length - 1].y;
 
-      // 2) on déplace la tête (ce code existait déjà plus bas, on peut le remonter)
-      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-      player.x += player.direction.x * speed;
-      player.y += player.direction.y * speed;
+// 2) On déplace la tête
+const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
+player.x += player.direction.x * speed;
+player.y += player.direction.y * speed;
 
-      // 3) on calcule la distance
-      const distThisFrame = distance({ x: oldX, y: oldY }, { x: player.x, y: player.y });
-      if (player.positionHistory.length === 0) {
-        // S'il n'y a pas de point dans l'historique, on push direct la position de départ
-        player.positionHistory.push({ x: oldX, y: oldY });
-      }
+// 3) On calcule la distance
+const distThisFrame = distance({ x: oldX, y: oldY }, { x: player.x, y: player.y });
 
-      // 4) si la distance est anormalement grande => on insère un point "mi-chemin"
-      const normalDist = SPEED_NORMAL; // distance "typique" en 16ms
-      if (distThisFrame > BOOST_DISTANCE_FACTOR * normalDist) {
-        // on calcule la position médiane
-        const midX = oldX + 0.5 * (player.x - oldX);
-        const midY = oldY + 0.5 * (player.y - oldY);
-        player.positionHistory.push({ x: midX, y: midY });
-      }
+// S'il n'y a pas encore de point dans l'historique, on ajoute la position de départ
+if (player.positionHistory.length === 0) {
+  player.positionHistory.push({ x: oldX, y: oldY });
+}
 
-      // 5) on ajoute la position finale
-      player.positionHistory.push({ x: player.x, y: player.y });
+// 4) Subdivisions multiples si la distance est trop grande
+const normalDist = SPEED_NORMAL;  // distance "typique" en 16ms
+const maxAllowed = BOOST_DISTANCE_FACTOR * normalDist;
+// On calcule combien de segments "maxAllowed" on a besoin pour couvrir distThisFrame
+// Au minimum 1
+const factor = Math.ceil(distThisFrame / maxAllowed);
 
-      // On limite la taille de l'historique
-      if (player.positionHistory.length > 5000) {
-        player.positionHistory.shift();
-      }
+if (factor > 1) {
+  // On ajoute (factor - 1) points intermédiaires
+  // Exemple: si factor = 5, on crée 4 points, répartis uniformément
+  for (let i = 1; i < factor; i++) {
+    const subRatio = i / factor;
+    const subX = oldX + subRatio * (player.x - oldX);
+    const subY = oldY + subRatio * (player.y - oldY);
+    player.positionHistory.push({ x: subX, y: subY });
+  }
+}
+
+// 5) On ajoute la position finale (tête)
+player.positionHistory.push({ x: player.x, y: player.y });
+
+// On limite la taille de l'historique
+if (player.positionHistory.length > 5000) {
+  player.positionHistory.shift();
+}
+
+// --- Suite du code identique ---
+// On applique ensuite getPositionAtDistance(...) pour construire la queue
+// On vérifie la sortie du monde, collisions items, etc.
+
 
       const skinColors = player.skinColors || getDefaultSkinColors();
       const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
