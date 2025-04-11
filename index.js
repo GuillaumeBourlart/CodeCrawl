@@ -608,7 +608,10 @@ setInterval(() => {
         io.to(id).emit("player_eliminated", { eliminatedBy: "boundary" });
         dropQueueItems(player, roomId);
         updateGlobalLeaderboard(id, player.itemEatenCount, player.pseudo || "Anonyme");
-        delete room.players[id];
+        player.isSpectator = true;
+        player.queue = [];
+        player.positionHistory = [];
+
         return;
       }
 
