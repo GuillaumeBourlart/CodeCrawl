@@ -493,7 +493,10 @@ io.on("connection", (socket) => {
         dropQueueItems(player, roomId);
         updateGlobalLeaderboard(socket.id, player.itemEatenCount, player.pseudo || "Anonyme");
       }
-      delete roomsData[roomId].players[socket.id];
+      player.isSpectator = true;
+      player.queue = [];
+      player.positionHistory = [];
+
     });
 
     socket.on("disconnect", async () => {
