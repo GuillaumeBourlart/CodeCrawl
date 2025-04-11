@@ -39,8 +39,8 @@ const BOOST_ITEM_COST = 3;
 const BOOST_INTERVAL_MS = 250;
 
 // On suppose ~16ms/tick => 60 FPS
-// On peut ajuster pour détecter un "gros saut" de la tête :
-const BOOST_DISTANCE_FACTOR = 1;  // Seuil, par ex. 1.7 * SPEED_NORMAL
+// Seuil pour détecter un gros saut de la tête :
+const BOOST_DISTANCE_FACTOR = 1;  // Vous pouvez l'ajuster
 
 // -- Constantes pour filtrer la zone visible --
 const VIEW_WIDTH = 1280;
@@ -104,27 +104,70 @@ function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function getPositionAtDistance(positionHistory, targetDistance) {
-  let totalDistance = 0;
-  for (let i = positionHistory.length - 1; i > 0; i--) {
-    const curr = positionHistory[i];
-    const prev = positionHistory[i - 1];
-    const segmentDistance = Math.hypot(curr.x - prev.x, curr.y - prev.y);
-    totalDistance += segmentDistance;
-    if (totalDistance >= targetDistance) {
-      const overshoot = totalDistance - targetDistance;
-      const fraction = overshoot / segmentDistance;
-      return {
-        x: curr.x * (1 - fraction) + prev.x * fraction,
-        y: curr.y * (1 - fraction) + prev.y * fraction
-      };
-    }
-  }
-  return { x: positionHistory[0].x, y: positionHistory[0].y };
+// --- Interpolation Catmull-Rom ---
+// Interpole de manière Catmull–Rom entre 4 points, pour t dans [0,1]
+function catmullRomInterpolate(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return {
+    x: 0.5 * ((2 * p1.x) +
+         (-p0.x + p2.x) * t +
+         (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+         (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+    y: 0.5 * ((2 * p1.y) +
+         (-p0.y + p2.y) * t +
+         (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+         (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
+  };
 }
 
-function circlesCollide(circ1, circ2) {
-  return Math.hypot(circ1.x - circ2.x, circ1.y - circ2.y) < (circ1.radius + circ2.radius);
+// --- Resample complet par Catmull-Rom ---
+// Cette fonction prend l'historique brut (positionHistory)
+// et renvoie un tableau de points espacés uniformément par "spacing".
+function resampleTrajectoryCatmullRom(positionHistory, spacing) {
+  if (positionHistory.length < 2) return positionHistory.slice();
+
+  // Pour gérer les bords, on étend le tableau en dupliquant les points de début et de fin.
+  const extended = [
+    positionHistory[0],
+    ...positionHistory,
+    positionHistory[positionHistory.length - 1]
+  ];
+
+  // Génération d'un échantillonnage fin (fine sampling) le long des segments de la spline.
+  let fine = [];
+  const steps = 20; // Nombre de sous-divisions par segment
+  for (let i = 1; i < extended.length - 2; i++) {
+    for (let j = 0; j < steps; j++) {
+      let t = j / steps;
+      let pt = catmullRomInterpolate(extended[i - 1], extended[i], extended[i + 1], extended[i + 2], t);
+      fine.push(pt);
+    }
+  }
+  // Ajouter le dernier point
+  fine.push(extended[extended.length - 2]);
+
+  // Calcul de la distance cumulée dans l'échantillonnage fin
+  let cumDist = [0];
+  for (let i = 1; i < fine.length; i++) {
+    cumDist.push(cumDist[i - 1] + distance(fine[i - 1], fine[i]));
+  }
+  const totalLength = cumDist[cumDist.length - 1];
+
+  // Re-échantillonner de manière uniforme
+  const resampled = [];
+  for (let d = 0; d <= totalLength; d += spacing) {
+    // Trouver l'intervalle dans cumDist
+    let idx = cumDist.findIndex(c => c >= d);
+    if (idx === -1) idx = cumDist.length - 1;
+    let t = (d - cumDist[idx - 1]) / (cumDist[idx] - cumDist[idx - 1]);
+    let pt = {
+      x: fine[idx - 1].x + t * (fine[idx].x - fine[idx - 1].x),
+      y: fine[idx - 1].y + t * (fine[idx].y - fine[idx - 1].y)
+    };
+    resampled.push(pt);
+  }
+  return resampled;
 }
 
 // --- Gestion des items (drops / génération) ---
@@ -255,7 +298,6 @@ function getVisibleItemsForPlayer(player, allItems) {
   const maxX = player.x + halfW;
   const minY = player.y - halfH;
   const maxY = player.y + halfH;
-
   return allItems.filter(item =>
     item.x >= minX && item.x <= maxX &&
     item.y >= minY && item.y <= maxY
@@ -269,20 +311,16 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
   const maxX = player.x + halfW;
   const minY = player.y - halfH;
   const maxY = player.y + halfH;
-
   const result = {};
   Object.entries(allPlayers).forEach(([pid, otherPlayer]) => {
     if (otherPlayer.isSpectator) return;
-
     const headIsVisible =
       otherPlayer.x >= minX && otherPlayer.x <= maxX &&
       otherPlayer.y >= minY && otherPlayer.y <= maxY;
-
     const filteredQueue = otherPlayer.queue.filter(seg =>
       seg.x >= minX && seg.x <= maxX &&
       seg.y >= minY && seg.y <= maxY
     );
-
     if (headIsVisible || filteredQueue.length > 0) {
       result[pid] = {
         x: otherPlayer.x,
@@ -307,7 +345,6 @@ app.use(cors({ origin: "*" }));
 
 io.on("connection", (socket) => {
   console.log("Nouveau client connecté:", socket.id);
-
   (async () => {
     const room = await findOrCreateRoom();
     if (!room) {
@@ -318,7 +355,6 @@ io.on("connection", (socket) => {
     }
     const roomId = room.id;
     console.log(`Le joueur ${socket.id} rejoint la room ${roomId}`);
-
     if (!roomsData[roomId]) {
       roomsData[roomId] = {
         players: {},
@@ -326,14 +362,12 @@ io.on("connection", (socket) => {
       };
       console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
     }
-
     // Direction aléatoire
     const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
     const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
     defaultDirection.x /= mag;
     defaultDirection.y /= mag;
-
-    // Initialisation du joueur
+    // Initialisation du joueur, incluant distAccumulator pour resampling (historique brut)
     roomsData[roomId].players[socket.id] = {
       x: Math.random() * 800,
       y: Math.random() * 600,
@@ -346,13 +380,12 @@ io.on("connection", (socket) => {
       isSpectator: false,
       skin_id: null,
       itemEatenCount: DEFAULT_ITEM_EATEN_COUNT,
-      queue: Array(6).fill({ x: Math.random() * 800, y: Math.random() * 600 })
+      queue: Array(6).fill({ x: Math.random() * 800, y: Math.random() * 600 }),
+      distAccumulator: 0
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
-
     socket.join(roomId);
     socket.emit("joined_room", { roomId });
-
     // setPlayerInfo
     socket.on("setPlayerInfo", async (data) => {
       const player = roomsData[roomId].players[socket.id];
@@ -365,7 +398,6 @@ io.on("connection", (socket) => {
       }
       console.log(`Infos définies pour ${socket.id}:`, data);
     });
-
     // Changement de direction
     socket.on("changeDirection", (data) => {
       const player = roomsData[roomId].players[socket.id];
@@ -388,14 +420,12 @@ io.on("connection", (socket) => {
       }
       player.direction = newDir;
     });
-
     // Boost
     socket.on("boostStart", () => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
       if (player.queue.length <= 6) return;
       if (player.boosting) return;
-
       // Retirer immédiatement un segment
       const droppedSegment = player.queue.pop();
       const r = randomItemRadius();
@@ -412,19 +442,14 @@ io.on("connection", (socket) => {
         dropTime: Date.now()
       };
       roomsData[roomId].items.push(droppedItem);
-
       if (player.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
-        player.itemEatenCount = Math.max(
-          DEFAULT_ITEM_EATEN_COUNT,
-          player.itemEatenCount - BOOST_ITEM_COST
-        );
+        player.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT, player.itemEatenCount - BOOST_ITEM_COST);
       }
-
       if (player.queue.length <= 6) {
         player.boosting = false;
         return;
       }
-      // Interval
+      // Interval pour boost continu
       player.boosting = true;
       player.boostInterval = setInterval(() => {
         if (player.queue.length > 6) {
@@ -445,10 +470,7 @@ io.on("connection", (socket) => {
           roomsData[roomId].items.push(droppedItem2);
           player.queue.pop();
           if (player.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
-            player.itemEatenCount = Math.max(
-              DEFAULT_ITEM_EATEN_COUNT,
-              player.itemEatenCount - BOOST_ITEM_COST
-            );
+            player.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT, player.itemEatenCount - BOOST_ITEM_COST);
           } else {
             clearInterval(player.boostInterval);
             player.boosting = false;
@@ -459,7 +481,6 @@ io.on("connection", (socket) => {
         }
       }, BOOST_INTERVAL_MS);
     });
-
     socket.on("boostStop", () => {
       const player = roomsData[roomId].players[socket.id];
       if (!player) return;
@@ -468,7 +489,6 @@ io.on("connection", (socket) => {
         player.boosting = false;
       }
     });
-
     // Déconnexion
     socket.on("disconnect", async () => {
       if (roomsData[roomId]?.players[socket.id]) {
@@ -484,14 +504,13 @@ io.on("connection", (socket) => {
 
 // -----------------------------------------------
 // Boucle de mise à jour du jeu : collisions, etc.
-// + LA "SOLUTION ULTIME" distance-based
+// + RESAMPLE COMPLETE de la trajectoire par interpolation Catmull–Rom
 // -----------------------------------------------
 setInterval(() => {
   Object.keys(roomsData).forEach(roomId => {
     const room = roomsData[roomId];
     const playerIds = Object.keys(room.players);
     const playersToEliminate = new Set();
-
     // Collision entre joueurs
     for (let i = 0; i < playerIds.length; i++) {
       for (let j = i + 1; j < playerIds.length; j++) {
@@ -523,7 +542,6 @@ setInterval(() => {
         }
       }
     }
-
     playersToEliminate.forEach(id => {
       io.to(id).emit("player_eliminated", { eliminatedBy: "collision" });
       const p = room.players[id];
@@ -534,81 +552,34 @@ setInterval(() => {
       p.queue = [];
       p.positionHistory = [];
     });
-
-    // Recalcule la queue, applique le pattern du skin
+    // Mise à jour de la trajectoire et construction de la queue
     Object.entries(room.players).forEach(([id, player]) => {
       if (player.isSpectator) return;
       if (!player.direction) return;
-
-      // 1) On retient l'ancienne position
-      const oldX = (player.positionHistory.length === 0)
-        ? player.x
-        : player.positionHistory[player.positionHistory.length - 1].x;
-      const oldY = (player.positionHistory.length === 0)
-        ? player.y
-        : player.positionHistory[player.positionHistory.length - 1].y;
-
-      // 2) On calcule le déplacement
-      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-      const newX = player.x + player.direction.x * speed;
-      const newY = player.y + player.direction.y * speed;
-
-      // 3) Distance sur ce tick
-      const distThisFrame = distance({ x: oldX, y: oldY }, { x: newX, y: newY });
-
-      // Si pas de point dans l'historique => on en ajoute un
-      if (player.positionHistory.length === 0) {
-        player.positionHistory.push({ x: oldX, y: oldY });
-      }
-
-      // *** AJOUT MULTIPLE-SUBDIVISIONS ***
-      // On calcule combien de fois "normalDist * BOOST_DISTANCE_FACTOR" rentre dans distThisFrame
-      const normalDist = SPEED_NORMAL;
-      const maxAllowed = BOOST_DISTANCE_FACTOR * normalDist;
-      const factor = Math.ceil(distThisFrame / maxAllowed);
-
-      // Subdivision
-      if (factor > 1) {
-        // On insère factor-1 points
-        for (let i = 1; i < factor; i++) {
-          const ratio = i / factor;
-          const midX = oldX + ratio * (newX - oldX);
-          const midY = oldY + ratio * (newY - oldY);
-          player.positionHistory.push({ x: midX, y: midY });
-        }
-      }
-
-      // Position finale
-      player.positionHistory.push({ x: newX, y: newY });
-
-      // On met à jour player.x, y
-      player.x = newX;
-      player.y = newY;
-
-      // On limite la taille
-      if (player.positionHistory.length > 5000) {
+      // --- Mise à jour de l'historique brut ---
+      player.positionHistory.push({ x: player.x, y: player.y });
+      if (player.positionHistory.length > 3000) {
         player.positionHistory.shift();
       }
-
-      // Construction de la queue
+      // --- Resample complet via interpolation Catmull–Rom ---
+      const tailSpacing = getHeadRadius(player) * 0.2;
+      // uniformHistory contiendra des points espacés uniformément de "tailSpacing"
+      const uniformHistory = resampleTrajectoryCatmullRom(player.positionHistory, tailSpacing);
+      // Construction de la queue à partir du chemin uniformisé
+      const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
       const skinColors = player.skinColors || getDefaultSkinColors();
       const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
         ? skinColors
         : getDefaultSkinColors();
-
-      const tailSpacing = getHeadRadius(player) * 0.2;
-      const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
-      const newQueue = [];
-      for (let i = 0; i < desiredSegments; i++) {
-        const targetDistance = (i + 1) * tailSpacing;
-        const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
-        const segmentColor = colors[i % 20];
-        newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
+      let newQueue = [];
+      for (let i = 1; i <= desiredSegments; i++) {
+        if (i < uniformHistory.length) {
+          newQueue.push({ x: uniformHistory[i].x, y: uniformHistory[i].y, color: colors[(i - 1) % 20] });
+        }
       }
       player.queue = newQueue;
       player.color = colors[0];
-
-      // Check sortie du monde
+      // Vérification de la sortie du monde
       const headRadius = getHeadRadius(player);
       if (
         (player.x - headRadius < 0) ||
@@ -624,12 +595,10 @@ setInterval(() => {
         player.positionHistory = [];
         return;
       }
-
-      // Collision avec items
+      // --- Collision avec items ---
       const headCircle = { x: player.x, y: player.y, radius: headRadius };
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
-        // Empêche de ré-avaler trop vite un item "boosté" par soi-même
         if (item.owner && item.owner === id) {
           if (Date.now() - item.dropTime < 500) continue;
         }
@@ -649,7 +618,6 @@ setInterval(() => {
           }
           room.items.splice(i, 1);
           i--;
-
           if (room.items.length < MAX_ITEMS) {
             const r = randomItemRadius();
             const value = getItemValue(r);
@@ -667,8 +635,7 @@ setInterval(() => {
         }
       }
     });
-
-    // Classement local (top 10)
+    // Leaderboard local (top 10)
     const sortedPlayers = Object.entries(room.players)
       .sort(([, a], [, b]) => b.itemEatenCount - a.itemEatenCount);
     const top10 = sortedPlayers.slice(0, 10).map(([id, player]) => ({
@@ -677,13 +644,11 @@ setInterval(() => {
       score: player.itemEatenCount,
       color: player.color
     }));
-
     // Envoi individuel
     for (const pid of Object.keys(room.players)) {
       const viewingPlayer = room.players[pid];
       const visibleItems = getVisibleItemsForPlayer(viewingPlayer, room.items);
       const visiblePlayers = getVisiblePlayersForPlayer(viewingPlayer, room.players);
-
       io.to(pid).emit("update_entities", {
         players: visiblePlayers,
         items: visibleItems,
