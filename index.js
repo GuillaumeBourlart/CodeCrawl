@@ -271,42 +271,37 @@ function getVisibleItemsForPlayer(player, allItems) {
 
 
 function getVisiblePlayersForPlayer(player, allPlayers) {
-  const VISIBLE_RADIUS = 100; // Ajuste la distance comme tu veux (50, 200, etc.)
+  // Même logique : on détermine un rectangle de vision
+  const halfW = VIEW_WIDTH / 2;
+  const halfH = VIEW_HEIGHT / 2;
+  const minX = player.x - halfW;
+  const maxX = player.x + halfW;
+  const minY = player.y - halfH;
+  const maxY = player.y + halfH;
+
   const result = {};
-
   Object.entries(allPlayers).forEach(([pid, otherPlayer]) => {
-    // Distance entre la tête du "viewer" (player) et la tête de otherPlayer
-    const dx = otherPlayer.x - player.x;
-    const dy = otherPlayer.y - player.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-
-    // Si la distance entre les deux joueurs est inférieure à VISIBLE_RADIUS,
-    // on décide de l'afficher. Sinon, on l'ignore complètement.
-    if (dist <= VISIBLE_RADIUS) {
-      // Ensuite, on filtre la queue de otherPlayer pour ne garder
-      // que les segments également proches de "player".
-      const partialQueue = otherPlayer.queue.filter(seg => {
-        const sdx = seg.x - player.x;
-        const sdy = seg.y - player.y;
-        const sdist = Math.sqrt(sdx * sdx + sdy * sdy);
-        return sdist <= VISIBLE_RADIUS;
-      });
-
-      // On construit l'objet "visible" minimal
-      result[pid] = {
-        x: otherPlayer.x,
-        y: otherPlayer.y,
-        pseudo: otherPlayer.pseudo,
-        color: otherPlayer.color,
-        itemEatenCount: otherPlayer.itemEatenCount,
-        boosting: otherPlayer.boosting,
-        direction: otherPlayer.direction,
-        skin_id: otherPlayer.skin_id,
-        queue: partialQueue,
-      };
-    }
+    // On prépare un objet "mini" ne contenant que les infos nécessaires
+    // et on filtre la queue pour n'envoyer que les segments visibles.
+    const partial = {
+      x: otherPlayer.x,
+      y: otherPlayer.y,
+      pseudo: otherPlayer.pseudo,
+      color: otherPlayer.color,
+      itemEatenCount: otherPlayer.itemEatenCount,
+      boosting: otherPlayer.boosting,
+      direction: otherPlayer.direction,
+      skin_id: otherPlayer.skin_id,
+      // Filtre de la queue
+      queue: otherPlayer.queue.filter(seg =>
+        seg.x >= minX && seg.x <= maxX &&
+        seg.y >= minY && seg.y <= maxY
+      ),
+    };
+    // Même la tête (x,y) de "otherPlayer" est incluse ci-dessus
+    // pour que le client voie la tête si elle est dans la zone.
+    result[pid] = partial;
   });
-
   return result;
 }
 
