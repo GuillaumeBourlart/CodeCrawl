@@ -39,8 +39,11 @@ const BOOST_ITEM_COST = 3;
 const BOOST_INTERVAL_MS = 250;
 
 // On suppose ~16ms/tick => 60 FPS
-// On peut ajuster pour détecter un "gros saut" de la tête :
-const BOOST_DISTANCE_FACTOR = 1;  // Seuil, par ex. 1.7 * SPEED_NORMAL
+// Seuil pour détecter un grand saut de la tête (exemple ici : si la distance dépasse 1×SPEED_NORMAL)
+const BOOST_DISTANCE_FACTOR = 1;
+
+// Pour le rééchantillonnage complet de la trajectoire (distance désirée entre deux points uniformisés, en pixels)
+const SAMPLING_STEP = 2;
 
 // -- Constantes pour filtrer la zone visible --
 const VIEW_WIDTH = 1280;
@@ -102,6 +105,30 @@ function getSegmentRadius(player) {
 
 function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+// Fonction de rééchantillonnage complet de la trajectoire
+function resamplePath(positionHistory, step) {
+  if (positionHistory.length === 0) return [];
+  const resampled = [];
+  let prev = positionHistory[0];
+  resampled.push({ x: prev.x, y: prev.y });
+  for (let i = 1; i < positionHistory.length; i++) {
+    const curr = positionHistory[i];
+    let d = distance(prev, curr);
+    while (d >= step) {
+      const ratio = step / d;
+      const newX = prev.x + ratio * (curr.x - prev.x);
+      const newY = prev.y + ratio * (curr.y - prev.y);
+      resampled.push({ x: newX, y: newY });
+      // Considère ce nouveau point comme point de départ pour le segment suivant
+      prev = { x: newX, y: newY };
+      d = distance(prev, curr);
+    }
+    // Passe au segment suivant
+    prev = curr;
+  }
+  return resampled;
 }
 
 function getPositionAtDistance(positionHistory, targetDistance) {
@@ -273,16 +300,13 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
   const result = {};
   Object.entries(allPlayers).forEach(([pid, otherPlayer]) => {
     if (otherPlayer.isSpectator) return;
-
     const headIsVisible =
       otherPlayer.x >= minX && otherPlayer.x <= maxX &&
       otherPlayer.y >= minY && otherPlayer.y <= maxY;
-
     const filteredQueue = otherPlayer.queue.filter(seg =>
       seg.x >= minX && seg.x <= maxX &&
       seg.y >= minY && seg.y <= maxY
     );
-
     if (headIsVisible || filteredQueue.length > 0) {
       result[pid] = {
         x: otherPlayer.x,
@@ -412,19 +436,14 @@ io.on("connection", (socket) => {
         dropTime: Date.now()
       };
       roomsData[roomId].items.push(droppedItem);
-
       if (player.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
-        player.itemEatenCount = Math.max(
-          DEFAULT_ITEM_EATEN_COUNT,
-          player.itemEatenCount - BOOST_ITEM_COST
-        );
+        player.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT, player.itemEatenCount - BOOST_ITEM_COST);
       }
-
       if (player.queue.length <= 6) {
         player.boosting = false;
         return;
       }
-      // Interval
+      // Interval pour continuer à retirer des segments pendant le boost
       player.boosting = true;
       player.boostInterval = setInterval(() => {
         if (player.queue.length > 6) {
@@ -445,10 +464,7 @@ io.on("connection", (socket) => {
           roomsData[roomId].items.push(droppedItem2);
           player.queue.pop();
           if (player.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
-            player.itemEatenCount = Math.max(
-              DEFAULT_ITEM_EATEN_COUNT,
-              player.itemEatenCount - BOOST_ITEM_COST
-            );
+            player.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT, player.itemEatenCount - BOOST_ITEM_COST);
           } else {
             clearInterval(player.boostInterval);
             player.boosting = false;
@@ -483,8 +499,8 @@ io.on("connection", (socket) => {
 });
 
 // -----------------------------------------------
-// Boucle de mise à jour du jeu : collisions, etc.
-// + LA "SOLUTION ULTIME" distance-based
+// Boucle de mise à jour du jeu : collisions, trajectoire & queue
+// Avec la solution « ultime » côté serveur : resample complet de la trajectoire
 // -----------------------------------------------
 setInterval(() => {
   Object.keys(roomsData).forEach(roomId => {
@@ -492,7 +508,7 @@ setInterval(() => {
     const playerIds = Object.keys(room.players);
     const playersToEliminate = new Set();
 
-    // Collision entre joueurs
+    // Gestion des collisions entre joueurs
     for (let i = 0; i < playerIds.length; i++) {
       for (let j = i + 1; j < playerIds.length; j++) {
         const id1 = playerIds[i], id2 = playerIds[j];
@@ -506,7 +522,7 @@ setInterval(() => {
           playersToEliminate.add(id2);
           continue;
         }
-        // collision tête / queue
+        // Collision tête / queue
         for (const segment of player2.queue) {
           const segmentCircle = { x: segment.x, y: segment.y, radius: getSegmentRadius(player2) };
           if (circlesCollide(head1, segmentCircle)) {
@@ -535,80 +551,55 @@ setInterval(() => {
       p.positionHistory = [];
     });
 
-    // Recalcule la queue, applique le pattern du skin
+    // Mise à jour de la trajectoire et reconstruction de la queue
     Object.entries(room.players).forEach(([id, player]) => {
       if (player.isSpectator) return;
       if (!player.direction) return;
-
-      // 1) On retient l'ancienne position
-      const oldX = (player.positionHistory.length === 0)
-        ? player.x
-        : player.positionHistory[player.positionHistory.length - 1].x;
-      const oldY = (player.positionHistory.length === 0)
-        ? player.y
-        : player.positionHistory[player.positionHistory.length - 1].y;
-
-      // 2) On calcule le déplacement
-      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
-      const newX = player.x + player.direction.x * speed;
-      const newY = player.y + player.direction.y * speed;
-
-      // 3) Distance sur ce tick
-      const distThisFrame = distance({ x: oldX, y: oldY }, { x: newX, y: newY });
-
-      // Si pas de point dans l'historique => on en ajoute un
-      if (player.positionHistory.length === 0) {
-        player.positionHistory.push({ x: oldX, y: oldY });
-      }
-
-      // *** AJOUT MULTIPLE-SUBDIVISIONS ***
-      // On calcule combien de fois "normalDist * BOOST_DISTANCE_FACTOR" rentre dans distThisFrame
-      const normalDist = SPEED_NORMAL;
-      const maxAllowed = BOOST_DISTANCE_FACTOR * normalDist;
-      const factor = Math.ceil(distThisFrame / maxAllowed);
-
-      // Subdivision
-      if (factor > 1) {
-        // On insère factor-1 points
-        for (let i = 1; i < factor; i++) {
-          const ratio = i / factor;
-          const midX = oldX + ratio * (newX - oldX);
-          const midY = oldY + ratio * (newY - oldY);
-          player.positionHistory.push({ x: midX, y: midY });
-        }
-      }
-
-      // Position finale
-      player.positionHistory.push({ x: newX, y: newY });
-
-      // On met à jour player.x, y
-      player.x = newX;
-      player.y = newY;
-
-      // On limite la taille
+      
+      // 1) Ajout de la position actuelle dans l'historique brut
+      player.positionHistory.push({ x: player.x, y: player.y });
       if (player.positionHistory.length > 5000) {
         player.positionHistory.shift();
       }
-
-      // Construction de la queue
+      
+      // 2) Calcul de la nouvelle position de la tête ce tick
+      const speed = player.boosting ? SPEED_BOOST : SPEED_NORMAL;
+      const newX = player.x + player.direction.x * speed;
+      const newY = player.y + player.direction.y * speed;
+      
+      // 3) Ajout de la nouvelle position brute dans l'historique
+      player.positionHistory.push({ x: newX, y: newY });
+      
+      // Mise à jour des coordonnées de la tête
+      player.x = newX;
+      player.y = newY;
+      if (player.positionHistory.length > 5000) {
+        player.positionHistory.shift();
+      }
+      
+      // 4) Rééchantillonnage complet de la trajectoire (pour obtenir un chemin uniformisé)
+      const uniformHistory = resamplePath(player.positionHistory, SAMPLING_STEP);
+      // (Optionnel) Log pour debug – attention, cela peut générer beaucoup de texte :
+      console.log(`Uniform history for player ${id}:`, uniformHistory);
+      
+      // 5) Reconstruction de la queue : pour chaque segment désiré, on cherche la position dans le chemin uniformisé
       const skinColors = player.skinColors || getDefaultSkinColors();
       const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
         ? skinColors
         : getDefaultSkinColors();
-
-      const tailSpacing = getHeadRadius(player) * 0.2;
+      const tailSpacing = getHeadRadius(player) * 0.2; // Espacement désiré entre segments
       const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
       const newQueue = [];
       for (let i = 0; i < desiredSegments; i++) {
         const targetDistance = (i + 1) * tailSpacing;
-        const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
+        const posAtDistance = getPositionAtDistance(uniformHistory, targetDistance);
         const segmentColor = colors[i % 20];
         newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
       }
       player.queue = newQueue;
       player.color = colors[0];
-
-      // Check sortie du monde
+      
+      // 6) Vérification de la sortie du monde
       const headRadius = getHeadRadius(player);
       if (
         (player.x - headRadius < 0) ||
@@ -624,12 +615,11 @@ setInterval(() => {
         player.positionHistory = [];
         return;
       }
-
-      // Collision avec items
+      
+      // 7) Collision avec items
       const headCircle = { x: player.x, y: player.y, radius: headRadius };
       for (let i = 0; i < room.items.length; i++) {
         const item = room.items[i];
-        // Empêche de ré-avaler trop vite un item "boosté" par soi-même
         if (item.owner && item.owner === id) {
           if (Date.now() - item.dropTime < 500) continue;
         }
@@ -649,7 +639,6 @@ setInterval(() => {
           }
           room.items.splice(i, 1);
           i--;
-
           if (room.items.length < MAX_ITEMS) {
             const r = randomItemRadius();
             const value = getItemValue(r);
@@ -667,7 +656,7 @@ setInterval(() => {
         }
       }
     });
-
+    
     // Classement local (top 10)
     const sortedPlayers = Object.entries(room.players)
       .sort(([, a], [, b]) => b.itemEatenCount - a.itemEatenCount);
@@ -677,13 +666,13 @@ setInterval(() => {
       score: player.itemEatenCount,
       color: player.color
     }));
-
-    // Envoi individuel
+    
+    // Envoi individuel des entités visibles à chaque joueur
     for (const pid of Object.keys(room.players)) {
       const viewingPlayer = room.players[pid];
       const visibleItems = getVisibleItemsForPlayer(viewingPlayer, room.items);
       const visiblePlayers = getVisiblePlayersForPlayer(viewingPlayer, room.players);
-
+      
       io.to(pid).emit("update_entities", {
         players: visiblePlayers,
         items: visibleItems,
