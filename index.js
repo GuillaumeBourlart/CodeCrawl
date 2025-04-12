@@ -564,6 +564,9 @@ setInterval(() => {
       // --- Re-sampling complet de l'historique ---
       // On recrée un chemin uniformisé basé sur SAMPLING_STEP
       const uniformHistory = resamplePath(player.positionHistory, SAMPLING_STEP);
+      // Log pour vérifier le contenu de l'historique et du chemin uniformisé
+      console.log(`Player ${id} - positionHistory:`, player.positionHistory);
+      console.log(`Player ${id} - uniformHistory:`, uniformHistory);
 
       // --- Mise à jour du déplacement ---
       // Calcul du déplacement de ce tick
