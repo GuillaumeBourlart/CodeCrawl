@@ -41,6 +41,7 @@ const BOOST_INTERVAL_MS = 250;
 // On suppose ~16ms/tick => 60 FPS
 // On peut ajuster pour détecter un "gros saut" de la tête :
 const BOOST_DISTANCE_FACTOR = 1;  // Seuil, par ex. 1.7 * SPEED_NORMAL
+const SAMPLING_STEP = 2; // Distance désirée entre 2 points du chemin uniformisé
 
 // -- Constantes pour filtrer la zone visible --
 const VIEW_WIDTH = 1280;
