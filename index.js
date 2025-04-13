@@ -6,10 +6,11 @@ import cors from "cors";
 import dotenv from "dotenv";
 dotenv.config();
 
-const { SUPABASE_URL = "", SUPABASE_ANON_KEY = "", PORT = 3000 } = process.env;
+const { SUPABASE_URL = "", SUPABASE_SERVICE_KEY = "", PORT = 3000 } = process.env;
 console.log("SUPABASE_URL:", SUPABASE_URL);
-console.log("SUPABASE_ANON_KEY:", SUPABASE_ANON_KEY ? "<non-empty>" : "<EMPTY>");
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+console.log("SUPABASE_SERVICE_KEY:", SUPABASE_SERVICE_KEY ? "<non-empty>" : "<EMPTY>");
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
 
 const app = express();
 const httpServer = createServer(app);
