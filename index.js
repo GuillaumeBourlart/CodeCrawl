@@ -90,20 +90,10 @@ async function deleteUserAccount(userId) {
     let { data: userSkinsData, error: userSkinsError } = await supabase
       .from("user_skins")
       .delete()
-      .eq("id", userId);
+      .eq("user_id", userId);
     if (userSkinsError) {
       console.error("Erreur lors de la suppression dans user_skins:", userSkinsError);
       throw userSkinsError;
-    }
-    
-    // 2. Supprimer les lignes dans "global_leaderboard" où "id" est égal à l'utilisateur
-    let { data: leaderboardData, error: leaderboardError } = await supabase
-      .from("global_leaderboard")
-      .delete()
-      .eq("id", userId);
-    if (leaderboardError) {
-      console.error("Erreur lors de la suppression dans global_leaderboard:", leaderboardError);
-      throw leaderboardError;
     }
     
     // 3. Supprimer la ligne dans "profiles" où "id" est égal à l'utilisateur
