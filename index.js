@@ -114,6 +114,39 @@ async function deleteUserAccount(userId) {
   }
 }
 
+// Route PUT pour mettre à jour uniquement le pseudo et le default_skin_id
+// On attend dans le body un objet JSON contenant { userId, pseudo, skin_id }
+app.put("/updateProfile", async (req, res) => {
+  const { userId, pseudo, skin_id } = req.body;
+
+  // Vérifier que tous les champs nécessaires sont présents
+  if (!userId || typeof pseudo === 'undefined' || typeof skin_id === 'undefined') {
+    return res.status(400).json({ success: false, message: "Les champs userId, pseudo et skin_id sont requis" });
+  }
+
+  // Pour la sécurité, ne prendre en compte que les champs autorisés
+  // Ici, on met à jour pseudo et default_skin_id, qui est notre colonne dans profiles.
+  const allowedData = {
+    pseudo,
+    default_skin_id: skin_id
+  };
+
+  // Exécuter la mise à jour dans la table 'profiles'
+  const { data, error } = await supabase
+    .from("profiles")
+    .update(allowedData)
+    .eq("id", userId);
+
+  if (error) {
+    console.error("Erreur lors de la mise à jour du profil:", error);
+    return res.status(500).json({ success: false, message: "Erreur lors de la mise à jour du profil", error });
+  }
+
+  console.log(`Profil mis à jour pour l'utilisateur ${userId}:`, allowedData);
+  res.json({ success: true, data });
+});
+
+
 // Route DELETE pour la suppression du compte utilisateur
 app.delete("/deleteAccount", async (req, res) => {
   // Pour la démonstration, on attend un userId dans le body de la requête (en production, utilisez une authentification)
