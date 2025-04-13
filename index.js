@@ -121,6 +121,26 @@ async function deleteUserAccount(userId) {
   }
 }
 
+// Route DELETE pour la suppression du compte utilisateur
+app.delete("/deleteAccount", async (req, res) => {
+  // Pour la démonstration, on attend un userId dans le body de la requête (en production, utilisez une authentification)
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ success: false, message: "userId manquant" });
+  }
+
+  // Ici, pensez à vérifier que le userId correspond bien à l'utilisateur authentifié (votre logique d'authentification)
+  
+  const result = await deleteUserAccount(userId);
+  if (result.success) {
+    res.json({ success: true, message: "Compte supprimé avec succès" });
+  } else {
+    res.status(500).json({ success: false, message: "Erreur lors de la suppression du compte", error: result.error });
+  }
+});
+
+
 
 function getDefaultSkinColors() {
   return [
