@@ -80,6 +80,48 @@ async function getSkinDataFromDB(skin_id) {
   return skin.colors;
 }
 
+// Fonction pour supprimer les données d'un utilisateur
+async function deleteUserAccount(userId) {
+  try {
+    // 1. Supprimer toutes les lignes dans "user_skins" où "id" est égal à l'utilisateur
+    let { data: userSkinsData, error: userSkinsError } = await supabase
+      .from("user_skins")
+      .delete()
+      .eq("id", userId);
+    if (userSkinsError) {
+      console.error("Erreur lors de la suppression dans user_skins:", userSkinsError);
+      throw userSkinsError;
+    }
+    
+    // 2. Supprimer les lignes dans "global_leaderboard" où "id" est égal à l'utilisateur
+    let { data: leaderboardData, error: leaderboardError } = await supabase
+      .from("global_leaderboard")
+      .delete()
+      .eq("id", userId);
+    if (leaderboardError) {
+      console.error("Erreur lors de la suppression dans global_leaderboard:", leaderboardError);
+      throw leaderboardError;
+    }
+    
+    // 3. Supprimer la ligne dans "profiles" où "id" est égal à l'utilisateur
+    let { data: profilesData, error: profilesError } = await supabase
+      .from("profiles")
+      .delete()
+      .eq("id", userId);
+    if (profilesError) {
+      console.error("Erreur lors de la suppression dans profiles:", profilesError);
+      throw profilesError;
+    }
+    
+    console.log(`Toutes les données de l'utilisateur ${userId} ont été supprimées.`);
+    return { success: true };
+  } catch (err) {
+    console.error("Erreur lors de la suppression du compte utilisateur:", err);
+    return { success: false, error: err };
+  }
+}
+
+
 function getDefaultSkinColors() {
   return [
     "#FF5733", "#33FF57", "#3357FF", "#FF33A8", "#33FFF5",
