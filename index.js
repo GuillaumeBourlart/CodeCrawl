@@ -17,6 +17,9 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 app.use(cors({ origin: "*" }));
 
+// Ajoutez ce middleware pour parser le body des requêtes en JSON
+app.use(express.json());
+
 // --- Configuration ---
 const itemColors = [
   "#FF5733",
