@@ -119,17 +119,27 @@ async function deleteUserAccount(userId) {
 app.put("/updateProfile", async (req, res) => {
   const { userId, pseudo, skin_id } = req.body;
 
-  // Vérifier que tous les champs nécessaires sont présents
-  if (!userId || typeof pseudo === 'undefined' || typeof skin_id === 'undefined') {
-    return res.status(400).json({ success: false, message: "Les champs userId, pseudo et skin_id sont requis" });
+  // Vérifier que le userId est présent
+  if (!userId) {
+    return res.status(400).json({ success: false, message: "Le champ userId est requis" });
   }
 
-  // Pour la sécurité, ne prendre en compte que les champs autorisés
-  // Ici, on met à jour pseudo et default_skin_id, qui est notre colonne dans profiles.
-  const allowedData = {
-    pseudo,
-    default_skin_id: skin_id
-  };
+  // Vérifier qu'au moins un des deux champs à mettre à jour est présent
+  if (typeof pseudo === 'undefined' && typeof skin_id === 'undefined') {
+    return res.status(400).json({ 
+      success: false, 
+      message: "Au moins un des champs 'pseudo' ou 'skin_id' est requis" 
+    });
+  }
+
+  // Construire dynamiquement l'objet de mise à jour
+  const allowedData = {};
+  if (typeof pseudo !== 'undefined') {
+    allowedData.pseudo = pseudo;
+  }
+  if (typeof skin_id !== 'undefined') {
+    allowedData.default_skin_id = skin_id;
+  }
 
   // Exécuter la mise à jour dans la table 'profiles'
   const { data, error } = await supabase
@@ -145,6 +155,7 @@ app.put("/updateProfile", async (req, res) => {
   console.log(`Profil mis à jour pour l'utilisateur ${userId}:`, allowedData);
   res.json({ success: true, data });
 });
+
 
 
 // Route DELETE pour la suppression du compte utilisateur
