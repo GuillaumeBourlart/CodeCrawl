@@ -627,7 +627,7 @@ setInterval(() => {
       player.y = newY;
       
       // 4) Rééchantillonnage de la trajectoire pour obtenir un chemin uniformisé
-      const uniformHistory = resamplePath(player.positionHistory, SAMPLING_STEP);
+      //const uniformHistory = resamplePath(player.positionHistory, SAMPLING_STEP);
       
       // 5) Reconstruction de la queue
       const skinColors = player.skinColors || getDefaultSkinColors();
@@ -639,7 +639,9 @@ setInterval(() => {
       const newQueue = [];
       for (let i = 0; i < desiredSegments; i++) {
         const targetDistance = (i + 1) * tailSpacing;
-        const posAtDistance = getPositionAtDistance(uniformHistory, targetDistance);
+        //const posAtDistance = getPositionAtDistance(uniformHistory, targetDistance);
+        const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
+
         const segmentColor = colors[i % 20];
         newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
       }
