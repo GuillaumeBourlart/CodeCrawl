@@ -37,14 +37,14 @@ const MIN_ITEM_RADIUS = 4;
 const MAX_ITEM_RADIUS = 10;
 const BASE_SIZE = 20; // Taille de base d'un cercle
 const MAX_ITEMS = 600;
-const SPEED_NORMAL = 3.2;
-const SPEED_BOOST = 6.4;
+const SPEED_NORMAL = 1.6;
+const SPEED_BOOST = 3.2;
 const BOUNDARY_MARGIN = 100;
 const DEFAULT_ITEM_EATEN_COUNT = 18; // 18 => 6 segments par défaut
 const BOOST_ITEM_COST = 3;
 const BOOST_INTERVAL_MS = 250;
 const BOOST_DISTANCE_FACTOR = 1;
-const SAMPLING_STEP = 2;
+const SAMPLING_STEP = 1;
 const VIEW_WIDTH = 1280;
 const VIEW_HEIGHT = 720;
 const MAX_HISTORY_LENGTH = 1000;  // Limite pour la positionHistory
@@ -728,7 +728,7 @@ setInterval(() => {
       });
     }
   });
-}, 16);
+}, 8);
 
 // Routes HTTP de base
 app.get("/", (req, res) => {
