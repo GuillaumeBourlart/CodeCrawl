@@ -31,7 +31,7 @@ const itemColors = [
   "#8B5CF6",
 ];
 const worldSize = { width: 4000, height: 4000 };
-const cellSize = 100;  // Taille d'une cellule pour la grille spatiale
+const cellSize = 400;  // Taille d'une cellule pour la grille spatiale
 
 const MIN_ITEM_RADIUS = 4;
 const MAX_ITEM_RADIUS = 10;
