@@ -470,6 +470,14 @@ function getVisiblePlayersForPlayer(player, allPlayers) {
 // Gestion de la connexion Socket.IO
 io.on("connection", (socket) => {
   console.log("Nouveau client connecté:", socket.id);
+
+  // répond à un ping_test et renvoie tout de suite un ACK
+socket.on("ping_test", (_data, ack) => {
+  // ack() envoie la réponse immédiatement
+  ack();
+});
+
+  
   (async () => {
     const room = await findOrCreateRoom();
     if (!room) {
