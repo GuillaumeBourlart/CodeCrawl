@@ -5,6 +5,17 @@ import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
 import dotenv from "dotenv";
 dotenv.config();
+import cluster from 'cluster';
+import os from 'os';
+
+if (cluster.isMaster) {
+  const cpuCount = os.cpus().length;
+  for (let i = 0; i < cpuCount; i++) {
+    cluster.fork();
+  }
+  cluster.on('exit', () => cluster.fork());
+  return;
+}
 
 const { SUPABASE_URL = "", SUPABASE_SERVICE_KEY = "", PORT = 3000 } = process.env;
 console.log("SUPABASE_URL:", SUPABASE_URL);
@@ -94,6 +105,37 @@ async function deleteUserAccount(userId) {
     return { success: false, error: err };
   }
 }
+
+function updateTail(player) {
+  const colors = (player.skinColors?.length >= 20) 
+    ? player.skinColors 
+    : getDefaultSkinColors();
+  const spacing = getHeadRadius(player) * 0.2;     // espacement désiré
+  const targetCount = Math.max(6, Math.floor(player.itemEatenCount / 3));
+  
+  const newQueue = [];
+  // on part de la tête
+  let prev = { x: player.x, y: player.y };
+
+  for (let i = 0; i < targetCount; i++) {
+    // récupère l’ancienne position de ce segment ou se caler sur prev
+    const old = player.queue[i] || prev;
+    const dx = prev.x - old.x;
+    const dy = prev.y - old.y;
+    const dist = Math.hypot(dx, dy) || spacing;
+    // calcule l’unité de direction
+    const ux = dx / dist;
+    const uy = dy / dist;
+    // positionne le segment exactement à “spacing” de prev
+    const segX = prev.x - ux * spacing;
+    const segY = prev.y - uy * spacing;
+    newQueue.push({ x: segX, y: segY, color: colors[i % 20] });
+    prev = { x: segX, y: segY };
+  }
+
+  player.queue = newQueue;
+}
+
 
 // Route PUT pour mettre à jour uniquement le pseudo et le default_skin_id
 // On attend dans le body un objet JSON contenant { userId, pseudo, skin_id }
@@ -720,25 +762,27 @@ setInterval(() => {
       
       // 4) Rééchantillonnage de la trajectoire pour obtenir un chemin uniformisé
       //const uniformHistory = resamplePath(player.positionHistory, SAMPLING_STEP);
+      // 4) Recalcule la queue à distance fixe
+      updateTail(player);
       
-      // 5) Reconstruction de la queue
-      const skinColors = player.skinColors || getDefaultSkinColors();
-      const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
-        ? skinColors
-        : getDefaultSkinColors();
-      const tailSpacing = getHeadRadius(player) * 0.2;
-      const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
-      const newQueue = [];
-      for (let i = 0; i < desiredSegments; i++) {
-        const targetDistance = (i + 1) * tailSpacing;
-        //const posAtDistance = getPositionAtDistance(uniformHistory, targetDistance);
-        const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
+      // // 5) Reconstruction de la queue
+      // const skinColors = player.skinColors || getDefaultSkinColors();
+      // const colors = (Array.isArray(skinColors) && skinColors.length >= 20)
+      //   ? skinColors
+      //   : getDefaultSkinColors();
+      // const tailSpacing = getHeadRadius(player) * 0.2;
+      // const desiredSegments = Math.max(6, Math.floor(player.itemEatenCount / 3));
+      // const newQueue = [];
+      // for (let i = 0; i < desiredSegments; i++) {
+      //   const targetDistance = (i + 1) * tailSpacing;
+      //   //const posAtDistance = getPositionAtDistance(uniformHistory, targetDistance);
+      //   const posAtDistance = getPositionAtDistance(player.positionHistory, targetDistance);
 
-        const segmentColor = colors[i % 20];
-        newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
-      }
-      player.queue = newQueue;
-      player.color = colors[0];
+      //   const segmentColor = colors[i % 20];
+      //   newQueue.push({ x: posAtDistance.x, y: posAtDistance.y, color: segmentColor });
+      // }
+      // player.queue = newQueue;
+      // player.color = colors[0];
       
       // 6) Vérification de la sortie du monde (frontières)
       const headRadius = getHeadRadius(player);
