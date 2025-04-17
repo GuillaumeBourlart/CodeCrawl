@@ -868,11 +868,14 @@ setInterval(() => {
       const viewingPlayer = room.players[pid];
       const visibleItems = getVisibleItemsForPlayer(viewingPlayer, room.items);
       const visiblePlayers = getVisiblePlayersForPlayer(viewingPlayer, room.players);
+      const now = Date.now();
       io.to(pid).emit("update_entities", {
         players: visiblePlayers,
         items: visibleItems,
-        leaderboard: top10
+        leaderboard: top10,
+        serverTs: now
       });
+      
     }
   });
 }, 8);
