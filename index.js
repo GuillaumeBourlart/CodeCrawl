@@ -45,8 +45,8 @@ const BOOST_ITEM_COST = 3;
 const BOOST_INTERVAL_MS = 250;
 const BOOST_DISTANCE_FACTOR = 1;
 const SAMPLING_STEP = 1;
-const VIEW_WIDTH = 1280;
-const VIEW_HEIGHT = 720;
+const VIEW_WIDTH = 1920;
+const VIEW_HEIGHT = 1080;
 const MAX_HISTORY_LENGTH = 1000;  // Limite pour la positionHistory
 
 // --- Fonctions utilitaires ---
