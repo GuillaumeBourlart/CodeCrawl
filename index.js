@@ -3,19 +3,6 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
-import dotenv from "dotenv";
-dotenv.config();
-import cluster from 'cluster';
-import os from 'os';
-
-if (cluster.isMaster) {
-  const cpuCount = os.cpus().length;
-  for (let i = 0; i < cpuCount; i++) {
-    cluster.fork();
-  }
-  cluster.on('exit', () => cluster.fork());
-  return;
-}
 
 const { SUPABASE_URL = "", SUPABASE_SERVICE_KEY = "", PORT = 3000 } = process.env;
 console.log("SUPABASE_URL:", SUPABASE_URL);
@@ -887,3 +874,5 @@ app.get("/globalLeaderboard", async (req, res) => {
 httpServer.listen(PORT, () => {
   console.log(`Serveur démarré sur le port ${PORT}`);
 });
+
+}
