@@ -35,8 +35,8 @@ const MIN_ITEM_RADIUS = 4;
 const MAX_ITEM_RADIUS = 10;
 const BASE_SIZE = 20; // Taille de base d'un cercle
 const MAX_ITEMS = 600;
-const SPEED_NORMAL = 1.6;
-const SPEED_BOOST = 3.2;
+const SPEED_NORMAL = 3.2;
+const SPEED_BOOST = 6.4;
 const BOUNDARY_MARGIN = 100;
 const BOOST_ITEM_COST = 4;
 const BOOST_INTERVAL_MS = 250;
@@ -400,21 +400,38 @@ async function findOrCreateRoom() {
 
 async function leaveRoom(roomId) {
   if (!roomId) return;
+
+  // 1) on récupère, sans erreur si aucune ligne
   const { data, error } = await supabase
     .from("rooms")
     .select("current_players")
     .eq("id", roomId)
-    .single();
-  if (!data || error) {
+    .maybeSingle();      // ← passe de .single() à .maybeSingle()
+
+  if (error) {
     console.error("Erreur lecture room (leaveRoom):", error);
     return;
   }
+  if (!data) {
+    // pas de ligne, la room a déjà été supprimée → on sort
+    return;
+  }
+
   const newCount = Math.max(0, data.current_players - 1);
-  console.log(`Mise à jour du nombre de joueurs pour la room ${roomId}: ${newCount}`);
-  await supabase
-    .from("rooms")
-    .update({ current_players: newCount })
-    .eq("id", roomId);
+
+  if (newCount === 0) {
+    // 2a) plus personne, on supprime la row
+    await supabase
+      .from("rooms")
+      .delete()
+      .eq("id", roomId);
+  } else {
+    // 2b) on décrémente simplement
+    await supabase
+      .from("rooms")
+      .update({ current_players: newCount })
+      .eq("id", roomId);
+  }
 }
 
 // Filtrage des entités visibles pour l'envoi aux clients
@@ -655,6 +672,7 @@ if (roomsData[roomId] && Object.keys(roomsData[roomId].players).length === 0) {
 
 // Intervalle de mise à jour groupée du leaderboard
 setInterval(async () => {
+  console.time("gameLoop");
   const updates = Object.entries(scoreUpdates).map(([id, data]) => ({ id, ...data }));
   if (updates.length > 0) {
     const { error } = await supabase.from("global_leaderboard").upsert(updates);
@@ -886,7 +904,8 @@ setInterval(() => {
       
     }
   });
-}, 8);
+   console.timeEnd("gameLoop");
+}, 16);
 
 // Routes HTTP de base
 app.get("/", (req, res) => {
