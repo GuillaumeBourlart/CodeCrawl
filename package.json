@@ -1,12 +1,13 @@
 {
   "name": "railway-snake-server",
   "version": "1.0.0",
-  "main": "cluster.js",
   "description": "Serveur Node pour un jeu snake.io-like avec Socket.io et Supabase",
   "type": "module",
-  "scripts": {
-    "start": "node cluster.js"
-  },
+  "main": "cluster.js",
+"scripts": {
+  "start": "node cluster.js"
+},
+
   "dependencies": {
     "dotenv": "^16.0.0",
     "express": "^4.18.2",
