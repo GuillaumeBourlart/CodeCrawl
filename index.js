@@ -64,6 +64,98 @@ function getCellCoordinates(x, y) {
   };
 }
 
+// Fonction pour supprimer les données d'un utilisateur
+async function deleteUserAccount(userId) {
+  try {
+    // 1. Supprimer toutes les lignes dans "user_skins" où "id" est égal à l'utilisateur
+    let { data: userSkinsData, error: userSkinsError } = await supabase
+      .from("user_skins")
+      .delete()
+      .eq("user_id", userId);
+    if (userSkinsError) {
+      console.error("Erreur lors de la suppression dans user_skins:", userSkinsError);
+      throw userSkinsError;
+    }
+    
+    // 3. Supprimer la ligne dans "profiles" où "id" est égal à l'utilisateur
+    let { data: profilesData, error: profilesError } = await supabase
+      .from("profiles")
+      .delete()
+      .eq("id", userId);
+    if (profilesError) {
+      console.error("Erreur lors de la suppression dans profiles:", profilesError);
+      throw profilesError;
+    }
+    
+    console.log(`Toutes les données de l'utilisateur ${userId} ont été supprimées.`);
+    return { success: true };
+  } catch (err) {
+    console.error("Erreur lors de la suppression du compte utilisateur:", err);
+    return { success: false, error: err };
+  }
+}
+
+// Route PUT pour mettre à jour uniquement le pseudo et le default_skin_id
+// On attend dans le body un objet JSON contenant { userId, pseudo, skin_id }
+app.put("/updateProfile", async (req, res) => {
+  const { userId, pseudo, skin_id } = req.body;
+
+  // Vérifier que le userId est présent
+  if (!userId) {
+    return res.status(400).json({ success: false, message: "Le champ userId est requis" });
+  }
+
+  // Vérifier qu'au moins un des deux champs à mettre à jour est présent
+  if (typeof pseudo === 'undefined' && typeof skin_id === 'undefined') {
+    return res.status(400).json({ 
+      success: false, 
+      message: "Au moins un des champs 'pseudo' ou 'skin_id' est requis" 
+    });
+  }
+
+  // Construire dynamiquement l'objet de mise à jour
+  const allowedData = {};
+  if (typeof pseudo !== 'undefined') {
+    allowedData.pseudo = pseudo;
+  }
+  if (typeof skin_id !== 'undefined') {
+    allowedData.default_skin_id = skin_id;
+  }
+
+  // Exécuter la mise à jour dans la table 'profiles'
+  const { data, error } = await supabase
+    .from("profiles")
+    .update(allowedData)
+    .eq("id", userId);
+
+  if (error) {
+    console.error("Erreur lors de la mise à jour du profil:", error);
+    return res.status(500).json({ success: false, message: "Erreur lors de la mise à jour du profil", error });
+  }
+
+  console.log(`Profil mis à jour pour l'utilisateur ${userId}:`, allowedData);
+  res.json({ success: true, data });
+});
+
+// Route DELETE pour la suppression du compte utilisateur
+app.delete("/deleteAccount", async (req, res) => {
+  // Pour la démonstration, on attend un userId dans le body de la requête (en production, utilisez une authentification)
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ success: false, message: "userId manquant" });
+  }
+
+  // Ici, pensez à vérifier que le userId correspond bien à l'utilisateur authentifié (votre logique d'authentification)
+  
+  const result = await deleteUserAccount(userId);
+  if (result.success) {
+    res.json({ success: true, message: "Compte supprimé avec succès" });
+  } else {
+    res.status(500).json({ success: false, message: "Erreur lors de la suppression du compte", error: result.error });
+  }
+});
+
 async function getSkinDataFromDB(skin_id) {
   if (skinCache[skin_id]) return skinCache[skin_id];
   const { data, error } = await supabase
