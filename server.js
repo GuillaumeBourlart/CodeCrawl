@@ -681,11 +681,13 @@ setInterval(async () => {
     }
     Object.keys(scoreUpdates).forEach(key => delete scoreUpdates[key]);
   }
+  console.timeEnd("gameLoop");
 }, 10000);  // Toutes les 10 000ms (10 secondes)
 
 // --------------------------------------------------------------
 // Boucle principale de mise à jour du jeu : collisions, trajectoire & queue
 setInterval(() => {
+  console.time("gameLoop");
   Object.keys(roomsData).forEach(roomId => {
     const room = roomsData[roomId];
     const playerIds = Object.keys(room.players);
