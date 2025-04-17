@@ -4,7 +4,6 @@
   "description": "Serveur Node pour un jeu snake.io-like avec Socket.io et Supabase",
   "type": "module",
   "scripts": {
-    // on démarre cluster.js, qui forke ensuite server.js dans chaque worker
     "start": "node cluster.js"
   },
   "dependencies": {
