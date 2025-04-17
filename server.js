@@ -39,13 +39,20 @@ const SPEED_NORMAL = 1.6;
 const SPEED_BOOST = 3.2;
 const BOUNDARY_MARGIN = 100;
 const DEFAULT_ITEM_EATEN_COUNT = 18; // 18 => 6 segments par défaut
-const BOOST_ITEM_COST = 3;
+const BOOST_ITEM_COST = 4;
 const BOOST_INTERVAL_MS = 250;
 const BOOST_DISTANCE_FACTOR = 1;
 const SAMPLING_STEP = 1;
 const VIEW_WIDTH = 1920;
 const VIEW_HEIGHT = 1080;
 const MAX_HISTORY_LENGTH = 1000;  // Limite pour la positionHistory
+
+// Au lieu de DEFAULT_ITEM_EATEN_COUNT = 18 (6 segments * 3 items)
+const ITEMS_PER_SEGMENT   = 4;    // 4 items pour gagner un segment
+const INITIAL_SEGMENTS    = 10;   // on démarre avec 10 segments
+const DEFAULT_ITEM_EATEN_COUNT = ITEMS_PER_SEGMENT * INITIAL_SEGMENTS; // = 40
+
+const HEAD_GROWTH_FACTOR  = 0.02; // avant c'était 0.05
 
 // --- Fonctions utilitaires ---
 function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
@@ -97,8 +104,12 @@ function updateTail(player) {
   const colors = (player.skinColors?.length >= 20) 
     ? player.skinColors 
     : getDefaultSkinColors();
-  const spacing = getHeadRadius(player) * 0.2;     // espacement désiré
-  const targetCount = Math.max(6, Math.floor(player.itemEatenCount / 3));
+  const spacing = getHeadRadius(player) * 0.3;     // espacement désiré
+  const targetCount = Math.max(
+  INITIAL_SEGMENTS,
+  Math.floor(player.itemEatenCount / ITEMS_PER_SEGMENT)
+);
+
   
   const newQueue = [];
   // on part de la tête
@@ -226,12 +237,17 @@ function randomItemRadius() {
 }
 
 function getHeadRadius(player) {
-  return BASE_SIZE / 2 + Math.max(0, player.itemEatenCount - DEFAULT_ITEM_EATEN_COUNT) * 0.05;
+  return BASE_SIZE / 2
+    + Math.max(0, player.itemEatenCount - DEFAULT_ITEM_EATEN_COUNT)
+      * HEAD_GROWTH_FACTOR;
 }
 
 function getSegmentRadius(player) {
-  return BASE_SIZE / 2 + Math.max(0, player.itemEatenCount - DEFAULT_ITEM_EATEN_COUNT) * 0.05;
+  return BASE_SIZE / 2
+    + Math.max(0, player.itemEatenCount - DEFAULT_ITEM_EATEN_COUNT)
+      * HEAD_GROWTH_FACTOR;
 }
+
 
 function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -489,7 +505,9 @@ io.on("connection", (socket) => {
       isSpectator: false,
       skin_id: null,
       itemEatenCount: DEFAULT_ITEM_EATEN_COUNT,
-      queue: Array(6).fill({ x: Math.random() * 800, y: Math.random() * 600 })
+      queue: Array(INITIAL_SEGMENTS)
+  .fill(null)
+  .map(() => ({ x: Math.random() * 800, y: Math.random() * 600 }))
     };
     console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
     socket.join(roomId);
@@ -614,6 +632,13 @@ io.on("connection", (socket) => {
           score: player.itemEatenCount
         };
         delete roomsData[roomId].players[socket.id];
+        // si plus aucun joueur dans la room en mémoire
+if (roomsData[roomId] && Object.keys(roomsData[roomId].players).length === 0) {
+  delete roomsData[roomId];
+  // et, si vous voulez vider la table SQL aussi :
+  await supabase.from("rooms").delete().eq("id", roomId);
+}
+
       }
       await leaveRoom(roomId);
     });
