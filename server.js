@@ -38,7 +38,6 @@ const MAX_ITEMS = 600;
 const SPEED_NORMAL = 1.6;
 const SPEED_BOOST = 3.2;
 const BOUNDARY_MARGIN = 100;
-const DEFAULT_ITEM_EATEN_COUNT = 18; // 18 => 6 segments par défaut
 const BOOST_ITEM_COST = 4;
 const BOOST_INTERVAL_MS = 250;
 const BOOST_DISTANCE_FACTOR = 1;
