@@ -12,6 +12,13 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
+import { createAdapter } from "socket.io-redis";
+import { Redis } from "ioredis";
+
+const pubClient = new Redis(process.env.REDIS_URL);
+const subClient = pubClient.duplicate();
+io.adapter(createAdapter({ pubClient, subClient }));
+
 const skinCache = {};
 const scoreUpdates = {};  // clé : id du joueur, valeur : { pseudo, score }
 
