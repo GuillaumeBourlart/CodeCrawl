@@ -3,6 +3,8 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import cors from "cors";
+import { createAdapter } from "@socket.io/redis-adapter";
+import { createClient as createRedisClient } from "redis";
 
 const { SUPABASE_URL = "", SUPABASE_SERVICE_KEY = "", PORT = 3000, REDIS_URL = "" } = process.env;
 const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -11,8 +13,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 
-import { createAdapter } from "@socket.io/redis-adapter";
-import { createClient as createRedisClient } from "redis";
+
 
 const pubClient = createRedisClient({ url: REDIS_URL });
 const subClient = pubClient.duplicate();
