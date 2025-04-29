@@ -957,6 +957,7 @@ setInterval(async () => {
         leaderboard: top10,
         serverTs: now
       });
+    }
        await saveRoom(roomId, state);
     }
   
