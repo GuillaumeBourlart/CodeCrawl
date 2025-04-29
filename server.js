@@ -690,7 +690,7 @@ if (roomsData[roomId] && Object.keys(roomsData[roomId].players).length === 0) {
 
 // Intervalle de mise à jour groupée du leaderboard
 setInterval(async () => {
-  ::console.time("leaderboardUpdate");
+  //console.time("leaderboardUpdate");
   const updates = Object.entries(scoreUpdates).map(([id, data]) => ({ id, ...data }));
   if (updates.length > 0) {
     const { error } = await supabase.from("global_leaderboard").upsert(updates);
@@ -699,7 +699,7 @@ setInterval(async () => {
     }
     Object.keys(scoreUpdates).forEach(key => delete scoreUpdates[key]);
   }
-  ::console.timeEnd("leaderboardUpdate");
+  //console.timeEnd("leaderboardUpdate");
 }, 10000);  // Toutes les 10 000ms (10 secondes)
 
 // --------------------------------------------------------------
