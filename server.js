@@ -961,7 +961,7 @@ setInterval(async () => {
     }
    await saveRoom(roomId, state);
    //console.timeEnd("gameLoop");
-}, 16);
+} 16);
 
 // Routes HTTP de base
 app.get("/", (req, res) => {
