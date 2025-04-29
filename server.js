@@ -12,6 +12,7 @@ const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
+const boostIntervals = new Map<string, NodeJS.Timer>();
 
 
 
@@ -41,14 +42,12 @@ async function getRoom(roomId) {
   return raw ? JSON.parse(raw) : null;
 }
 
-async function saveRoom(roomId, roomData) {
-  const dataToStore = JSON.stringify(
-    roomData,
-    (key, value) => key === "boostInterval" ? undefined : value
-  );
+
+
+async function saveRoom(roomId: string, roomData: any) {
   await pubClient.set(
     ROOM_PREFIX + roomId,
-    dataToStore,
+    JSON.stringify(roomData),
     { EX: EXPIRATION_TIME }
   );
 }
@@ -626,17 +625,19 @@ socket.on("ping_test", (_data, ack) => {
     });
     
     // Boost
-   socket.on("boostStart", async () => {
+  
+// 2) Lors d’un boostStart : on crée le timer, on le stocke dans la Map
+socket.on("boostStart", async () => {
   const state = await getRoom(roomId);
   if (!state) return;
 
   const player = state.players[socket.id];
   if (!player || player.queue.length <= 6 || player.boosting) return;
 
-  // 1) drop un segment
-  const seg = player.queue.pop();
+  // drop d’un segment
+  const seg = player.queue.pop()!;
   const r = randomItemRadius();
-  const droppedItem = {
+  state.items.push({
     id: `dropped-${Date.now()}`,
     x: clampPosition(seg.x, seg.y).x,
     y: clampPosition(seg.x, seg.y).y,
@@ -645,27 +646,29 @@ socket.on("ping_test", (_data, ack) => {
     owner: socket.id,
     radius: r,
     dropTime: Date.now()
-  };
-  state.items.push(droppedItem);
+  });
 
-  // 2) ajuster itemEatenCount
   if (player.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
-    player.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT,
-      player.itemEatenCount - BOOST_ITEM_COST);
+    player.itemEatenCount = Math.max(
+      DEFAULT_ITEM_EATEN_COUNT,
+      player.itemEatenCount - BOOST_ITEM_COST
+    );
   }
 
-  // 3) démarrer l’intervalle
   player.boosting = true;
-  player.boostInterval = setInterval(async () => {
+
+  // on démarre le timer et on garde son handle hors du state
+  const handle = setInterval(async () => {
     const st = await getRoom(roomId);
     const pl = st.players[socket.id];
     if (!pl || pl.queue.length <= 6) {
-      clearInterval(pl.boostInterval);
-      pl.boosting = false;
+      clearInterval(handle);
+      boostIntervals.delete(socket.id);
+      if (pl) pl.boosting = false;
       await saveRoom(roomId, st);
       return;
     }
-    const last = pl.queue.pop();
+    const last = pl.queue.pop()!;
     const rr = randomItemRadius();
     st.items.push({
       id: `dropped-${Date.now()}`,
@@ -678,32 +681,44 @@ socket.on("ping_test", (_data, ack) => {
       dropTime: Date.now()
     });
     if (pl.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
-      pl.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT,
-        pl.itemEatenCount - BOOST_ITEM_COST);
+      pl.itemEatenCount = Math.max(
+        DEFAULT_ITEM_EATEN_COUNT,
+        pl.itemEatenCount - BOOST_ITEM_COST
+      );
     }
     await saveRoom(roomId, st);
   }, BOOST_INTERVAL_MS);
 
+  boostIntervals.set(socket.id, handle);
   await saveRoom(roomId, state);
 });
-    
-    socket.on("boostStop", async () => {
+
+// 3) Arrêt du boost : on clear le timer depuis la Map
+socket.on("boostStop", async () => {
   const state = await getRoom(roomId);
   if (!state) return;
   const player = state.players[socket.id];
-  if (player?.boosting) {
-    clearInterval(player.boostInterval);
+  const handle = boostIntervals.get(socket.id);
+  if (player?.boosting && handle) {
+    clearInterval(handle);
+    boostIntervals.delete(socket.id);
     player.boosting = false;
     await saveRoom(roomId, state);
   }
 });
-    
-    // Déconnexion
-   socket.on("disconnect", async () => {
+
+// 4) À la déconnexion : idem, on clear le timer et on supprime de la Map
+socket.on("disconnect", async () => {
   const state = await getRoom(roomId);
   if (state?.players[socket.id]) {
+    // on clear l’éventuel boost en cours
+    const handle = boostIntervals.get(socket.id);
+    if (handle) {
+      clearInterval(handle);
+      boostIntervals.delete(socket.id);
+    }
+
     const player = state.players[socket.id];
-    clearInterval(player.boostInterval);
     await dropQueueItems(player, roomId);
 
     scoreUpdates[socket.id] = {
@@ -712,7 +727,6 @@ socket.on("ping_test", (_data, ack) => {
     };
     delete state.players[socket.id];
 
-    // si plus personne, cleanup SQL
     if (Object.keys(state.players).length === 0) {
       await supabase.from("rooms").delete().eq("id", roomId);
     }
