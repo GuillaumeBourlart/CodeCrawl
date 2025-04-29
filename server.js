@@ -1,35 +1,34 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { createClient } from "@supabase/supabase-js";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import cors from "cors";
 
-const { SUPABASE_URL = "", SUPABASE_SERVICE_KEY = "", PORT = 3000 } = process.env;
-console.log("SUPABASE_URL:", SUPABASE_URL);
-console.log("SUPABASE_SERVICE_KEY:", SUPABASE_SERVICE_KEY ? "<non-empty>" : "<EMPTY>");
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+const { SUPABASE_URL = "", SUPABASE_SERVICE_KEY = "", PORT = 3000, REDIS_URL = "" } = process.env;
+const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 
 import { createAdapter } from "@socket.io/redis-adapter";
-import { createClient } from "redis";
+import { createClient as createRedisClient } from "redis";
 
-const pubClient = createClient({ url: process.env.REDIS_URL });
+const pubClient = createRedisClient({ url: REDIS_URL });
 const subClient = pubClient.duplicate();
 
-// Branchez l’adaptateur **après** avoir connecté les clients Redis
 (async () => {
   await pubClient.connect();
   await subClient.connect();
+
+  // Branche l’adaptateur Redis pour partager les rooms entre les workers
   io.adapter(createAdapter(pubClient, subClient));
 
+  // Démarre ensuite le serveur HTTP / Socket.IO
   httpServer.listen(PORT, () => {
     console.log(`Serveur démarré sur le port ${PORT}`);
   });
 })();
-
 
 const skinCache = {};
 const scoreUpdates = {};  // clé : id du joueur, valeur : { pseudo, score }
