@@ -33,6 +33,22 @@ const subClient = pubClient.duplicate();
 
 const skinCache = {};
 const scoreUpdates = {};  // clé : id du joueur, valeur : { pseudo, score }
+const ROOM_PREFIX = "room:";
+const EXPIRATION_TIME = 60 * 60; // 1 heure en secondes
+
+async function getRoom(roomId) {
+  const raw = await pubClient.get(ROOM_PREFIX + roomId);
+  return raw ? JSON.parse(raw) : null;
+}
+
+async function saveRoom(roomId, roomData) {
+  await pubClient.set(
+    ROOM_PREFIX + roomId,
+    JSON.stringify(roomData),
+    { EX: EXPIRATION_TIME }
+  );
+}
+
 
 app.use(cors({ origin: "*" }));
 app.use(express.json());
@@ -317,25 +333,27 @@ function circlesCollide(circ1, circ2) {
 }
 
 // Gestion des items : drops / génération
-function dropQueueItems(player, roomId) {
-  player.queue.forEach((segment, index) => {
-    if (index % 3 === 0) {
-      const r = randomItemRadius();
-      const value = getItemValue(r);
-      const pos = clampPosition(segment.x, segment.y);
-      const droppedItem = {
-        id: `dropped-${Date.now()}-${Math.random()}`,
-        x: pos.x,
-        y: pos.y,
-        value: value,
-        color: segment.color,
-        radius: r,
-        dropTime: Date.now()
-      };
-      roomsData[roomId].items.push(droppedItem);
-    }
-  });
+async function dropQueueItems(player, roomId) {
+  const room = await getRoom(roomId);
+  if (!room) return;
+  for (let i = 0; i < player.queue.length; i += 3) {
+    const seg = player.queue[i];
+    const r   = randomItemRadius();
+    const value = getItemValue(r);
+    const pos = clampPosition(seg.x, seg.y);
+    room.items.push({
+      id: `dropped-${Date.now()}-${Math.random()}`,
+      x: pos.x,
+      y: pos.y,
+      value,
+      color: seg.color,
+      radius: r,
+      dropTime: Date.now()
+    });
+  }
+  await saveRoom(roomId, room);
 }
+
 
 function generateRandomItems(count, worldSize) {
   const items = [];
@@ -353,8 +371,6 @@ function generateRandomItems(count, worldSize) {
   }
   return items;
 }
-
-const roomsData = {};
 
 async function updateGlobalLeaderboard(playerId, score, pseudo) {
   const { error } = await supabase
@@ -524,58 +540,69 @@ socket.on("ping_test", (_data, ack) => {
     }
     const roomId = room.id;
     console.log(`Le joueur ${socket.id} rejoint la room ${roomId}`);
-    if (!roomsData[roomId]) {
-      roomsData[roomId] = {
-        players: {},
-        items: generateRandomItems(MAX_ITEMS, worldSize)
-      };
-      console.log(`Initialisation de la room ${roomId} avec ${MAX_ITEMS} items.`);
-    }
-    // Initialisation du joueur
-    const defaultDirection = { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 };
-    const mag = Math.sqrt(defaultDirection.x ** 2 + defaultDirection.y ** 2) || 1;
-    defaultDirection.x /= mag;
-    defaultDirection.y /= mag;
-    roomsData[roomId].players[socket.id] = {
-      x: Math.random() * 800,
-      y: Math.random() * 600,
-      length: BASE_SIZE,
-      positionHistory: [],
-      direction: defaultDirection,
-      boosting: false,
-      color: null,
-      pseudo: null,
-      isSpectator: false,
-      skin_id: null,
-      itemEatenCount: DEFAULT_ITEM_EATEN_COUNT,
-      queue: Array(INITIAL_SEGMENTS)
-  .fill(null)
-  .map(() => ({ x: Math.random() * 800, y: Math.random() * 600 }))
+    // Charge ou initialise la room depuis Redis
+  let state = await getRoom(roomId);
+  if (!state) {
+    state = {
+      players: {},
+      items: generateRandomItems(MAX_ITEMS, worldSize)
     };
-    console.log(`Initialisation du joueur ${socket.id} dans la room ${roomId}`);
-    socket.join(roomId);
-    socket.emit("joined_room", { roomId });
+  }
+
+  // Crée ton joueur en mémoire
+  const defaultDirection = { x: Math.random()*2-1, y: Math.random()*2-1 };
+  const mag = Math.hypot(defaultDirection.x, defaultDirection.y) || 1;
+  defaultDirection.x /= mag; defaultDirection.y /= mag;
+
+  state.players[socket.id] = {
+    x: Math.random() * 800,
+    y: Math.random() * 600,
+    positionHistory: [],
+    direction: defaultDirection,
+    boosting: false,
+    color: null,
+    pseudo: null,
+    isSpectator: false,
+    skin_id: null,
+    itemEatenCount: DEFAULT_ITEM_EATEN_COUNT,
+    queue: Array(INITIAL_SEGMENTS).fill({ x:0, y:0 })
+  };
+
+  // Sauvegarde immédiate
+  await saveRoom(roomId, state);
+
+  socket.join(roomId);
+  socket.emit("joined_room", { roomId });
     
     // Événement pour définir les infos du joueur
     socket.on("setPlayerInfo", async (data) => {
-      const player = roomsData[roomId].players[socket.id];
-      if (player && data.pseudo && data.skin_id) {
-        player.pseudo = data.pseudo;
-        player.skin_id = data.skin_id;
-        const skinColors = await getSkinDataFromDB(player.skin_id);
-        player.skinColors = skinColors;
-        player.color = skinColors[0];
-      }
-      console.log(`Infos définies pour ${socket.id}:`, data);
+  const state = await getRoom(roomId);
+  if (!state) return;
+
+  const player = state.players[socket.id];
+  if (player && data.pseudo && data.skin_id) {
+    player.pseudo     = data.pseudo;
+    player.skin_id    = data.skin_id;
+    player.skinColors = await getSkinDataFromDB(data.skin_id);
+    player.color      = player.skinColors[0];
+  }
+
+  await saveRoom(roomId, state);
+  console.log(`Infos définies pour ${socket.id}:`, data);
     });
     
     // Changement de direction
-    socket.on("changeDirection", (data) => {
-      const player = roomsData[roomId].players[socket.id];
-      if (!player) return;
-      const { x, y } = data.direction;
-      const mag2 = Math.sqrt(x * x + y * y) || 1;
-      let newDir = { x: x / mag2, y: y / mag2 };
+    socket.on("changeDirection", async (data) => {
+  const state = await getRoom(roomId);
+  if (!state) return;
+
+  const player = state.players[socket.id];
+  if (!player) return;
+
+  const { x, y } = data.direction;
+  let mag2 = Math.hypot(x, y) || 1;
+  let newDir = { x: x/mag2, y: y/mag2 };
+      
       const currentDir = player.direction;
       const dot = currentDir.x * newDir.x + currentDir.y * newDir.y;
       const clampedDot = Math.min(Math.max(dot, -1), 1);
@@ -590,101 +617,105 @@ socket.on("ping_test", (_data, ack) => {
         };
       }
       player.direction = newDir;
+      await saveRoom(roomId, state);
     });
     
     // Boost
-    socket.on("boostStart", () => {
-      const player = roomsData[roomId].players[socket.id];
-      if (!player) return;
-      if (player.queue.length <= 6) return;
-      if (player.boosting) return;
-      const droppedSegment = player.queue.pop();
-      const r = randomItemRadius();
-      const value = getItemValue(r);
-      const pos = clampPosition(droppedSegment.x, droppedSegment.y);
-      const droppedItem = {
-        id: `dropped-${Date.now()}`,
-        x: pos.x,
-        y: pos.y,
-        value: value,
-        color: droppedSegment.color,
-        owner: socket.id,
-        radius: r,
-        dropTime: Date.now()
-      };
-      roomsData[roomId].items.push(droppedItem);
-      if (player.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
-        player.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT, player.itemEatenCount - BOOST_ITEM_COST);
-      }
-      if (player.queue.length <= 6) {
-        player.boosting = false;
-        return;
-      }
-      player.boosting = true;
-      player.boostInterval = setInterval(() => {
-        if (player.queue.length > 6) {
-          const lastSeg = player.queue[player.queue.length - 1];
-          const pos2 = clampPosition(lastSeg.x, lastSeg.y);
-          const r2 = randomItemRadius();
-          const value2 = getItemValue(r2);
-          const droppedItem2 = {
-            id: `dropped-${Date.now()}`,
-            x: pos2.x,
-            y: pos2.y,
-            value: value2,
-            color: lastSeg.color,
-            owner: socket.id,
-            radius: r2,
-            dropTime: Date.now()
-          };
-          roomsData[roomId].items.push(droppedItem2);
-          player.queue.pop();
-          if (player.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
-            player.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT, player.itemEatenCount - BOOST_ITEM_COST);
-          } else {
-            clearInterval(player.boostInterval);
-            player.boosting = false;
-          }
-        } else {
-          clearInterval(player.boostInterval);
-          player.boosting = false;
-        }
-      }, BOOST_INTERVAL_MS);
+   socket.on("boostStart", async () => {
+  const state = await getRoom(roomId);
+  if (!state) return;
+
+  const player = state.players[socket.id];
+  if (!player || player.queue.length <= 6 || player.boosting) return;
+
+  // 1) drop un segment
+  const seg = player.queue.pop();
+  const r = randomItemRadius();
+  const droppedItem = {
+    id: `dropped-${Date.now()}`,
+    x: clampPosition(seg.x, seg.y).x,
+    y: clampPosition(seg.x, seg.y).y,
+    value: getItemValue(r),
+    color: seg.color,
+    owner: socket.id,
+    radius: r,
+    dropTime: Date.now()
+  };
+  state.items.push(droppedItem);
+
+  // 2) ajuster itemEatenCount
+  if (player.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
+    player.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT,
+      player.itemEatenCount - BOOST_ITEM_COST);
+  }
+
+  // 3) démarrer l’intervalle
+  player.boosting = true;
+  player.boostInterval = setInterval(async () => {
+    const st = await getRoom(roomId);
+    const pl = st.players[socket.id];
+    if (!pl || pl.queue.length <= 6) {
+      clearInterval(pl.boostInterval);
+      pl.boosting = false;
+      await saveRoom(roomId, st);
+      return;
+    }
+    const last = pl.queue.pop();
+    const rr = randomItemRadius();
+    st.items.push({
+      id: `dropped-${Date.now()}`,
+      x: clampPosition(last.x, last.y).x,
+      y: clampPosition(last.x, last.y).y,
+      value: getItemValue(rr),
+      color: last.color,
+      owner: socket.id,
+      radius: rr,
+      dropTime: Date.now()
     });
+    if (pl.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
+      pl.itemEatenCount = Math.max(DEFAULT_ITEM_EATEN_COUNT,
+        pl.itemEatenCount - BOOST_ITEM_COST);
+    }
+    await saveRoom(roomId, st);
+  }, BOOST_INTERVAL_MS);
+
+  await saveRoom(roomId, state);
+});
     
-    socket.on("boostStop", () => {
-      const player = roomsData[roomId].players[socket.id];
-      if (!player) return;
-      if (player.boosting) {
-        clearInterval(player.boostInterval);
-        player.boosting = false;
-      }
-    });
+    socket.on("boostStop", async () => {
+  const state = await getRoom(roomId);
+  if (!state) return;
+  const player = state.players[socket.id];
+  if (player?.boosting) {
+    clearInterval(player.boostInterval);
+    player.boosting = false;
+    await saveRoom(roomId, state);
+  }
+});
     
     // Déconnexion
-    socket.on("disconnect", async () => {
-      const player = roomsData[roomId]?.players[socket.id];
-      if (player) {
-        if (player.boostInterval) {
-          clearInterval(player.boostInterval);
-          player.boostInterval = null;
-        }
-        dropQueueItems(player, roomId);
-        scoreUpdates[socket.id] = {
-          pseudo: player.pseudo || "Anonyme",
-          score: player.itemEatenCount
-        };
-        delete roomsData[roomId].players[socket.id];
-        // si plus aucun joueur dans la room en mémoire
-if (roomsData[roomId] && Object.keys(roomsData[roomId].players).length === 0) {
-  delete roomsData[roomId];
-  // et, si vous voulez vider la table SQL aussi :
-  await supabase.from("rooms").delete().eq("id", roomId);
-}
+   socket.on("disconnect", async () => {
+  const state = await getRoom(roomId);
+  if (state?.players[socket.id]) {
+    const player = state.players[socket.id];
+    clearInterval(player.boostInterval);
+    await dropQueueItems(player, roomId);
 
-      }
-      await leaveRoom(roomId);
-    });
+    scoreUpdates[socket.id] = {
+      pseudo: player.pseudo || "Anonyme",
+      score: player.itemEatenCount
+    };
+    delete state.players[socket.id];
+
+    // si plus personne, cleanup SQL
+    if (Object.keys(state.players).length === 0) {
+      await supabase.from("rooms").delete().eq("id", roomId);
+    }
+    await saveRoom(roomId, state);
+  }
+  await leaveRoom(roomId);
+});
+
     
   })();
 });
@@ -705,16 +736,19 @@ setInterval(async () => {
 
 // --------------------------------------------------------------
 // Boucle principale de mise à jour du jeu : collisions, trajectoire & queue
-setInterval(() => {
-  //console.time("gameLoop");
-  Object.keys(roomsData).forEach(roomId => {
-    const room = roomsData[roomId];
-    const playerIds = Object.keys(room.players);
+setInterval(async () => {
+  const keys = await pubClient.keys(`${ROOM_PREFIX}*`);
+
+  for (const fullKey of keys) {
+    const roomId = fullKey.slice(ROOM_PREFIX.length);
+    const state  = await getRoom(roomId);
+    if (!state) continue;
+    const playerIds = Object.keys(state.players);
     
     // --- Regroupement des joueurs dans une grille spatiale ---
     const grid = {};
     playerIds.forEach(pid => {
-      const player = room.players[pid];
+      const player = state.players[pid];
       if (!player) return;
       const { cellX, cellY } = getCellCoordinates(player.x, player.y);
       const key = `${cellX}-${cellY}`;
@@ -783,7 +817,7 @@ setInterval(() => {
     // Traitement des joueurs à éliminer suite aux collisions
     playersToEliminate.forEach(id => {
       io.to(id).emit("player_eliminated", { eliminatedBy: "collision" });
-      const p = room.players[id];
+      const p = state.players[id];
       if (!p) return;
       dropQueueItems(p, roomId);
       scoreUpdates[id] = {
@@ -796,7 +830,7 @@ setInterval(() => {
     });
     
     // --- Mise à jour de la trajectoire et reconstruction de la queue ---
-    Object.entries(room.players).forEach(([id, player]) => {
+   Object.entries(state.players).forEach(([id, player]) => {
       if (player.isSpectator || !player.direction) return;
       
       // 1) Ajout de la position actuelle dans la positionHistory
@@ -861,28 +895,29 @@ setInterval(() => {
       
       // 7) Collision avec les items
       const headCircle = { x: player.x, y: player.y, radius: headRadius };
-      for (let i = 0; i < room.items.length; i++) {
-        const item = room.items[i];
+      for (let i = 0; i < state.items.length; i++) {
+        const item = state.items[i];
         if (item.owner && item.owner === id) {
           if (Date.now() - item.dropTime < 500) continue;
         }
         const itemCircle = { x: item.x, y: item.y, radius: item.radius };
         if (circlesCollide(headCircle, itemCircle)) {
+          const palette = (player.skinColors?.length >= 20) ? player.skinColors : getDefaultSkinColors();
           const oldQueueLength = player.queue.length;
           player.itemEatenCount += item.value;
           const targetQueueLength = Math.max(6, Math.floor(player.itemEatenCount / 3));
           const segmentsToAdd = targetQueueLength - oldQueueLength;
           for (let j = 0; j < segmentsToAdd; j++) {
             if (player.queue.length === 0) {
-              player.queue.push({ x: player.x, y: player.y, color: colors[1] });
+              player.queue.push({ x: player.x, y: player.y, color: palette[player.queue.length % palette.length] });
             } else {
               const lastSeg = player.queue[player.queue.length - 1];
               player.queue.push({ x: lastSeg.x, y: lastSeg.y, color: lastSeg.color });
             }
           }
-          room.items.splice(i, 1);
+          state.items.splice(i, 1);
           i--;
-          if (room.items.length < MAX_ITEMS) {
+          if (state.items.length < MAX_ITEMS) {
             const r = randomItemRadius();
             const value = getItemValue(r);
             const newItem = {
@@ -893,7 +928,7 @@ setInterval(() => {
               color: itemColors[Math.floor(Math.random() * itemColors.length)],
               radius: r
             };
-            room.items.push(newItem);
+            state.items.push(newItem);
           }
           break;
         }
@@ -901,7 +936,7 @@ setInterval(() => {
     });
     
     // Classement local (top 10)
-    const sortedPlayers = Object.entries(room.players)
+    const sortedPlayers = Object.entries(state.players)
       .sort(([, a], [, b]) => b.itemEatenCount - a.itemEatenCount);
     const top10 = sortedPlayers.slice(0, 10).map(([id, player]) => ({
       id,
@@ -911,10 +946,10 @@ setInterval(() => {
     }));
     
     // Envoi des entités visibles à chaque joueur
-    for (const pid of Object.keys(room.players)) {
-      const viewingPlayer = room.players[pid];
-      const visibleItems = getVisibleItemsForPlayer(viewingPlayer, room.items);
-      const visiblePlayers = getVisiblePlayersForPlayer(viewingPlayer, room.players);
+    for (const pid of Object.keys(state.players)) {
+      const viewingPlayer = state.players[pid];
+      const visibleItems = getVisibleItemsForPlayer(viewingPlayer, state.items);
+      const visiblePlayers = getVisiblePlayersForPlayer(viewingPlayer, state.players);
       const now = Date.now();
       io.to(pid).emit("update_entities", {
         players: visiblePlayers,
@@ -924,7 +959,7 @@ setInterval(() => {
       });
       
     }
-  });
+   await saveRoom(roomId, state);
    //console.timeEnd("gameLoop");
 }, 16);
 
