@@ -42,12 +42,17 @@ async function getRoom(roomId) {
 }
 
 async function saveRoom(roomId, roomData) {
+  const dataToStore = JSON.stringify(
+    roomData,
+    (key, value) => key === "boostInterval" ? undefined : value
+  );
   await pubClient.set(
     ROOM_PREFIX + roomId,
-    JSON.stringify(roomData),
+    dataToStore,
     { EX: EXPIRATION_TIME }
   );
 }
+
 
 
 app.use(cors({ origin: "*" }));
