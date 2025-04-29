@@ -634,7 +634,7 @@ socket.on("boostStart", async () => {
   const player = state.players[socket.id];
   if (!player || player.queue.length <= 6 || player.boosting) return;
 
-  // drop d’un segment
+  // 1) on drop un segment
   const seg = player.queue.pop();
   const r = randomItemRadius();
   state.items.push({
@@ -648,6 +648,7 @@ socket.on("boostStart", async () => {
     dropTime: Date.now()
   });
 
+  // 2) on ajuste itemEatenCount
   if (player.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
     player.itemEatenCount = Math.max(
       DEFAULT_ITEM_EATEN_COUNT,
@@ -657,7 +658,7 @@ socket.on("boostStart", async () => {
 
   player.boosting = true;
 
-  // on démarre le timer et on garde son handle hors du state
+  // 3) on démarre l’intervalle et on garde son handle hors du state
   const handle = setInterval(async () => {
     const st = await getRoom(roomId);
     const pl = st.players[socket.id];
@@ -668,7 +669,8 @@ socket.on("boostStart", async () => {
       await saveRoom(roomId, st);
       return;
     }
-    const last = pl.queue.pop()!;
+
+    const last = pl.queue.pop();
     const rr = randomItemRadius();
     st.items.push({
       id: `dropped-${Date.now()}`,
@@ -680,12 +682,14 @@ socket.on("boostStart", async () => {
       radius: rr,
       dropTime: Date.now()
     });
+
     if (pl.itemEatenCount > DEFAULT_ITEM_EATEN_COUNT) {
       pl.itemEatenCount = Math.max(
         DEFAULT_ITEM_EATEN_COUNT,
         pl.itemEatenCount - BOOST_ITEM_COST
       );
     }
+
     await saveRoom(roomId, st);
   }, BOOST_INTERVAL_MS);
 
@@ -697,15 +701,17 @@ socket.on("boostStart", async () => {
 socket.on("boostStop", async () => {
   const state = await getRoom(roomId);
   if (!state) return;
+
   const player = state.players[socket.id];
   const handle = boostIntervals.get(socket.id);
-  if (player?.boosting && handle) {
+  if (player && player.boosting && handle) {
     clearInterval(handle);
     boostIntervals.delete(socket.id);
     player.boosting = false;
     await saveRoom(roomId, state);
   }
 });
+
 
 // 4) À la déconnexion : idem, on clear le timer et on supprime de la Map
 socket.on("disconnect", async () => {
