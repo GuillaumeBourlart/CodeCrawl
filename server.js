@@ -12,7 +12,7 @@ const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
-const boostIntervals = new Map<string, NodeJS.Timer>();
+const boostIntervals = new Map();
 
 
 
@@ -44,7 +44,7 @@ async function getRoom(roomId) {
 
 
 
-async function saveRoom(roomId: string, roomData: any) {
+async function saveRoom(roomId, roomData) {
   await pubClient.set(
     ROOM_PREFIX + roomId,
     JSON.stringify(roomData),
@@ -635,7 +635,7 @@ socket.on("boostStart", async () => {
   if (!player || player.queue.length <= 6 || player.boosting) return;
 
   // drop d’un segment
-  const seg = player.queue.pop()!;
+  const seg = player.queue.pop();
   const r = randomItemRadius();
   state.items.push({
     id: `dropped-${Date.now()}`,
