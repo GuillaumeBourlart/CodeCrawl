@@ -945,8 +945,6 @@ app.get("/globalLeaderboard", async (req, res) => {
   res.json(data);
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`Serveur démarré sur le port ${PORT}`);
-});
+
 
 
