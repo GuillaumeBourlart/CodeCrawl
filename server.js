@@ -12,12 +12,24 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
-import { createAdapter } from "socket.io-redis";
-import { Redis } from "ioredis";
 
-const pubClient = new Redis(process.env.REDIS_URL);
+import { createAdapter } from "@socket.io/redis-adapter";
+import { createClient } from "redis";
+
+const pubClient = createClient({ url: process.env.REDIS_URL });
 const subClient = pubClient.duplicate();
-io.adapter(createAdapter({ pubClient, subClient }));
+
+// Branchez l’adaptateur **après** avoir connecté les clients Redis
+(async () => {
+  await pubClient.connect();
+  await subClient.connect();
+  io.adapter(createAdapter(pubClient, subClient));
+
+  httpServer.listen(PORT, () => {
+    console.log(`Serveur démarré sur le port ${PORT}`);
+  });
+})();
+
 
 const skinCache = {};
 const scoreUpdates = {};  // clé : id du joueur, valeur : { pseudo, score }
