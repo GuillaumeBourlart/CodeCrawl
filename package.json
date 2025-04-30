@@ -5,7 +5,8 @@
   "type": "module",
   "main": "cluster.js",
 "scripts": {
-  "start": "node cluster.js"
+ "start": "node server.js",
+"start:cluster": "node cluster.js"
 },
 
   "dependencies": {
