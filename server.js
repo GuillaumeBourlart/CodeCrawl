@@ -605,6 +605,7 @@ io.on("connection", socket => {
     const p = state?.players[socket.id];
     if (p) p.boosting = false;
   });
+});
 
 httpServer.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
