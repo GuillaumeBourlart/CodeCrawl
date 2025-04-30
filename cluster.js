@@ -22,16 +22,9 @@ if (cluster.isPrimary) {
 
   // 2) Activation du sticky‐load‐balancing
   //    route chaque session Socket.IO (sid) vers le même worker
-  
- setupMaster(httpServer, {
-   loadBalancingMethod: "custom",
-   // on "sticky" par roomId, pas par sid
-   detectSessionId: (req) => {
-     // req.url ressemble à "/socket.io/?roomId=123&EIO=4&transport=polling&sid=XYZ"
-     const m = /roomId=([^&]+)/.exec(req.url);
-     return m ? m[1] : null;
-   }
- });
+  setupMaster(httpServer, {
+    loadBalancingMethod: "least-connection", // ou "round-robin"/"random"
+  });  // :contentReference[oaicite:0]{index=0}
 
   // 3) Pour que createAdapter() fonctionne entre workers
   setupPrimary();  // :contentReference[oaicite:1]{index=1}
@@ -62,4 +55,3 @@ if (cluster.isPrimary) {
       process.exit(1);
     });
 }
-
