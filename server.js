@@ -1,6 +1,8 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
++import { createAdapter } from "@socket.io/cluster-adapter";
++import { setupWorker } from "@socket.io/sticky";
 import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
 
@@ -10,8 +12,16 @@ console.log("SUPABASE_SERVICE_KEY:", SUPABASE_SERVICE_KEY ? "<non-empty>" : "<EM
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 const app = express();
+
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
+
+// ——— Sticky sessions & cluster-adapter ———
+io.adapter(createAdapter());    // diffuse les rooms entre workers
+setupWorker(io);                // rattache ce worker au Primary
+
+
 const skinCache = {};
 const scoreUpdates = {};  // clé : id du joueur, valeur : { pseudo, score }
 
