@@ -5,6 +5,8 @@ import { createAdapter } from "@socket.io/cluster-adapter";
 import { setupWorker } from "@socket.io/sticky";
 import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
+import dotenv from "dotenv";
+dotenv.config();
 
 const { SUPABASE_URL = "", SUPABASE_SERVICE_KEY = "", PORT = 3000 } = process.env;
 console.log("SUPABASE_URL:", SUPABASE_URL);
@@ -18,8 +20,8 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 
 // ——— Sticky sessions & cluster-adapter ———
-io.adapter(createAdapter());    // diffuse les rooms entre workers
-setupWorker(io);                // rattache ce worker au Primary
+//io.adapter(createAdapter());    // diffuse les rooms entre workers
+//setupWorker(io);                // rattache ce worker au Primary
 
 
 const skinCache = {};
