@@ -56,6 +56,77 @@ const skinCache = {};
 
 const itemColors = ["#FF5733","#33FF57","#3357FF","#FF33A8","#33FFF5","#FFD133","#8B5CF6"];
 
+// 1) Nombre max d’items par salle
+const MAX_ITEMS = 600;
+
+// 2) Génération aléatoire d’items
+function generateRandomItems(count, worldSize) {
+  const items = [];
+  for (let i = 0; i < count; i++) {
+    const r = randomRadius();
+    const value = getItemValue(r);
+    items.push({
+      id: `item-${i}-${Date.now()}`,
+      x: BOUNDARY_MARGIN + Math.random() * (worldSize.width - 2 * BOUNDARY_MARGIN),
+      y: BOUNDARY_MARGIN + Math.random() * (worldSize.height - 2 * BOUNDARY_MARGIN),
+      value,
+      color: itemColors[Math.floor(Math.random() * itemColors.length)],
+      radius: r
+    });
+  }
+  return items;
+}
+
+// 3) Mettre à jour le leaderboard global
+async function updateGlobalLeaderboard(playerId, score, pseudo) {
+  const { error } = await supabase
+    .from("global_leaderboard")
+    .upsert([{ id: playerId, pseudo, score }]);
+  if (error) console.error("updateGlobalLeaderboard error:", error);
+}
+
+// 4) Dropper les segments restants en items
+function dropQueueItems(player, roomId) {
+  const state = rooms.get(roomId);
+  if (!state) return;
+  for (let i = 0; i < player.queue.length; i += 3) {
+    const seg = player.queue[i];
+    const r   = randomRadius();
+    const value = getItemValue(r);
+    state.items.push({
+      id: `dropped-${Date.now()}-${Math.random()}`,
+      x: seg.x,
+      y: seg.y,
+      radius: r,
+      value,
+      color: seg.color,
+      dropTime: Date.now()
+    });
+  }
+}
+
+// 5) Décrémenter (ou supprimer) la row rooms.current_players
+async function leaveRoom(roomId) {
+  if (!roomId) return;
+  const { data, error } = await supabase
+    .from("rooms")
+    .select("current_players")
+    .eq("id", roomId)
+    .maybeSingle();
+  if (error || !data) return;
+
+  const newCount = Math.max(0, data.current_players - 1);
+  if (newCount === 0) {
+    await supabase.from("rooms").delete().eq("id", roomId);
+  } else {
+    await supabase
+      .from("rooms")
+      .update({ current_players: newCount })
+      .eq("id", roomId);
+  }
+}
+
+
 // Utilitaires**
 function clampPosition(x, y, margin = BOUNDARY_MARGIN) {
   return { x: Math.min(Math.max(x, margin), worldSize.width - margin),
@@ -105,6 +176,69 @@ function getDefaultSkinColors() {
     "#FFFF00", "#FF00FF", "#00FFFF", "#AAAAAA", "#BBBBBB",
     "#CCCCCC", "#DDDDDD", "#EEEEEE", "#999999", "#333333"
   ];
+}
+
+async function findOrCreateRoom() {
+  let { data: existingRooms, error } = await supabase
+    .from("rooms")
+    .select("*")
+    .lt("current_players", 25)
+    .order("current_players", { ascending: true })
+    .limit(1);
+  if (error) {
+    console.error("Erreur Supabase (findOrCreateRoom):", error);
+    return null;
+  }
+  let room = (existingRooms && existingRooms.length > 0) ? existingRooms[0] : null;
+  if (!room) {
+    const { data: newRoomData, error: newRoomError } = await supabase
+      .from("rooms")
+      .insert([{ name: "New Room" }])
+      .select()
+      .single();
+    if (newRoomError) {
+      console.error("Erreur création room:", newRoomError);
+      return null;
+    }
+    room = newRoomData;
+  }
+  console.log(`Room trouvée/créée: ${room.id} avec ${room.current_players} joueurs.`);
+  await supabase
+    .from("rooms")
+    .update({ current_players: room.current_players + 1 })
+    .eq("id", room.id);
+  return room;
+}
+
+// Fonction pour supprimer les données d'un utilisateur
+async function deleteUserAccount(userId) {
+  try {
+    // 1. Supprimer toutes les lignes dans "user_skins" où "id" est égal à l'utilisateur
+    let { data: userSkinsData, error: userSkinsError } = await supabase
+      .from("user_skins")
+      .delete()
+      .eq("user_id", userId);
+    if (userSkinsError) {
+      console.error("Erreur lors de la suppression dans user_skins:", userSkinsError);
+      throw userSkinsError;
+    }
+    
+    // 3. Supprimer la ligne dans "profiles" où "id" est égal à l'utilisateur
+    let { data: profilesData, error: profilesError } = await supabase
+      .from("profiles")
+      .delete()
+      .eq("id", userId);
+    if (profilesError) {
+      console.error("Erreur lors de la suppression dans profiles:", profilesError);
+      throw profilesError;
+    }
+    
+    console.log(`Toutes les données de l'utilisateur ${userId} ont été supprimées.`);
+    return { success: true };
+  } catch (err) {
+    console.error("Erreur lors de la suppression du compte utilisateur:", err);
+    return { success: false, error: err };
+  }
 }
 
 // Load all rooms from Redis via SCAN + MGET pipeline
