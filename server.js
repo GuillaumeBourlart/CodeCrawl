@@ -942,4 +942,6 @@ app.get("/globalLeaderboard", async (req, res) => {
 });
 
 
-
+httpServer.listen(PORT, () => {
+  console.log(`Serveur worker ${process.pid} à l’écoute sur le port ${PORT}`);
+});
