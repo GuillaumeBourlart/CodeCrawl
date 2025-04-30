@@ -31,6 +31,9 @@ io.adapter(createAdapter(pubClient, subClient));
 
 // In-memory state cache
 const rooms = new Map();  // roomId => { players, items }
+// map socket.id → roomId pour retrouver la room quand le client ne l'envoie pas
+const socketRooms = new Map();
+
 const boostIntervals = new Map(); // socketId => interval handle
 const scoreBuffer = {};
 
@@ -507,6 +510,7 @@ io.on("connection", socket => {
         itemEatenCount: DEFAULT_ITEM_COUNT
       };
       socket.join(roomId);
+       socketRooms.set(socket.id, roomId);
       socket.emit("joined_room", { roomId });
       console.log(`→ ${socket.id} joined room ${roomId}`);
     } catch (err) {
@@ -516,7 +520,8 @@ io.on("connection", socket => {
   });
 
   socket.on("setPlayerInfo", async data => {
-    const state = rooms.get(data.roomId);
+    const state = data?.roomId ?? socketRooms.get(socket.id);
+    if (!roomId) return;
     if (!state || !state.players[socket.id]) return;
     const p = state.players[socket.id];
     p.pseudo = data.pseudo;
@@ -526,7 +531,8 @@ io.on("connection", socket => {
   });
 
   socket.on("changeDirection", data => {
-    const state = rooms.get(data.roomId);
+    const state = data?.roomId ?? socketRooms.get(socket.id);
+    if (!roomId) return;
     const p = state?.players[socket.id];
     if (!p) return;
     let { x, y } = data.direction;
@@ -545,7 +551,8 @@ io.on("connection", socket => {
   });
 
   socket.on("boostStart", data => {
-    const state = rooms.get(data.roomId);
+    const state = data?.roomId ?? socketRooms.get(socket.id);
+  if (!roomId) return;
     const p = state?.players[socket.id];
     if (!p || p.queue.length <= 6 || p.boosting) return;
     const seg = p.queue.pop();
@@ -569,6 +576,7 @@ io.on("connection", socket => {
       clearInterval(h);
       boostIntervals.delete(socket.id);
       const p = rooms.get(data.roomId)?.players[socket.id];
+
       if (p) p.boosting = false;
     }
   });
