@@ -48,6 +48,8 @@ const INITIAL_SEGMENTS = 10;
 const DEFAULT_ITEM_COUNT = ITEMS_PER_SEGMENT * INITIAL_SEGMENTS;
 const BASE_SIZE = 20;
 const HEAD_GROWTH = 0.02;
+const skinCache = {};
+
 
 const itemColors = ["#FF5733","#33FF57","#3357FF","#FF33A8","#33FFF5","#FFD133","#8B5CF6"];
 
@@ -67,7 +69,40 @@ function getSegmentRadius(p) { return getHeadRadius(p); }
 function getItemValue(r) {
   return Math.round(1 + ((r-4)/(10-4))*5);
 }
-function randomRadius() { return Math.floor(Math.random()*(10-4+1))+4; }
+function randomRadius() {
+  return Math.floor(Math.random() * (MAX_ITEM_RADIUS - MIN_ITEM_RADIUS + 1)) + MIN_ITEM_RADIUS;
+}
+
+
+async function getSkinDataFromDB(skin_id) {
+  if (skinCache[skin_id]) return skinCache[skin_id];
+  const { data, error } = await supabase
+    .from("game_skins")
+    .select("data")
+    .eq("id", skin_id)
+    .single();
+  if (error || !data) {
+    console.error("Erreur de récupération du skin :", error);
+    return getDefaultSkinColors();
+  }
+  const skin = data.data;
+  if (!skin || !skin.colors || skin.colors.length !== 20) {
+    console.warn("Le skin récupéré ne contient pas 20 couleurs. Utilisation du skin par défaut.");
+    return getDefaultSkinColors();
+  }
+  // Stocker dans le cache
+  skinCache[skin_id] = skin.colors;
+  return skin.colors;
+}
+
+function getDefaultSkinColors() {
+  return [
+    "#FF5733", "#33FF57", "#3357FF", "#FF33A8", "#33FFF5",
+    "#FFD133", "#8B5CF6", "#FF0000", "#00FF00", "#0000FF",
+    "#FFFF00", "#FF00FF", "#00FFFF", "#AAAAAA", "#BBBBBB",
+    "#CCCCCC", "#DDDDDD", "#EEEEEE", "#999999", "#333333"
+  ];
+}
 
 // Load all rooms from Redis via SCAN + MGET pipeline
 async function loadAllRooms() {
