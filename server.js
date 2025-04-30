@@ -593,16 +593,6 @@ io.on("connection", socket => {
     boostIntervals.set(socket.id, handle);
   });
 
-  socket.on("boostStop", data => {
-    const h = boostIntervals.get(socket.id);
-    if (h) {
-      clearInterval(h);
-      boostIntervals.delete(socket.id);
-      const p = rooms.get(data.roomId)?.players[socket.id];
-
-      if (p) p.boosting = false;
-    }
-  });
 
   socket.on("boostStop", data => {
     const h = boostIntervals.get(socket.id);
