@@ -15,6 +15,9 @@ console.log("SUPABASE_SERVICE_KEY:", SUPABASE_SERVICE_KEY ? "<non-empty>" : "<EM
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 const app = express();
+app.use(cors({ origin: "*" }));
+app.options("*", cors());
+app.use(express.json());
 
 
 const httpServer = createServer(app);
@@ -28,10 +31,6 @@ const io = new Server(httpServer, { cors: { origin: "*" } });
 const skinCache = {};
 const scoreUpdates = {};  // clé : id du joueur, valeur : { pseudo, score }
 
-
-app.options("*", cors());
-
-app.use(express.json());
 
 // --- Configuration ---
 const itemColors = [
