@@ -746,6 +746,7 @@ setInterval(() => {
         for (let j = i + 1; j < nearbyPlayers.length; j++) {
           const p1 = nearbyPlayers[i].player;
           const p2 = nearbyPlayers[j].player;
+          if (p1.isSpectator || p2.isSpectator) continue;
           const id1 = nearbyPlayers[i].id;
           const id2 = nearbyPlayers[j].id;
           const head1 = { x: p1.x, y: p1.y, radius: getHeadRadius(p1) };
