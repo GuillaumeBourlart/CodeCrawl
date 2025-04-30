@@ -3,10 +3,14 @@ import cluster from "cluster";
 import { createServer } from "http";
 import os from "os";
 
+// charge les variables depuis .env
+import dotenv from "dotenv";
+
 // sticky-sessions & cluster-adapter
 import { setupMaster, setupWorker } from "@socket.io/sticky";
 import { createAdapter, setupPrimary } from "@socket.io/cluster-adapter";
 
+dotenv.config();
 const PORT = process.env.PORT || 3000;
 const numCPUs = os.cpus().length;
 
