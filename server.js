@@ -281,6 +281,50 @@ io.on("connection",socket=>{
   console.log("client connected",socket.id);
   socket.on("ping_test",(_,ack)=>ack());
 
+   // 1) quand le client demande à rejoindre une partie
+  socket.on("join_room", async () => {
+    try {
+      const roomDb = await findOrCreateRoom();       // fonction existante
+      if (!roomDb) {
+        socket.emit("no_room_available");
+        return;
+      }
+      const roomId = roomDb.id;
+
+      // charge l'état en mémoire ou initialise
+      let state = rooms.get(roomId);
+      if (!state) {
+        // essaie de récupérer depuis Redis
+        const data = await pubClient.get(ROOM_PREFIX + roomId);
+        state = data
+          ? JSON.parse(data)
+          : { players: {}, items: generateRandomItems(MAX_ITEMS, worldSize) };
+        rooms.set(roomId, state);
+      }
+
+      // ajoute le joueur vide (sera rempli après setPlayerInfo)
+      state.players[socket.id] = {
+        x: Math.random() * 800,
+        y: Math.random() * 600,
+        queue: Array(INITIAL_SEGMENTS).fill({ x:0,y:0 }),
+        positionHistory: [],
+        direction: { x:0, y:0 },
+        boosting: false,
+        isSpectator: false,
+        pseudo: null,
+        skin_id: null,
+        itemEatenCount: DEFAULT_ITEM_COUNT
+      };
+
+      socket.join(roomId);
+      socket.emit("joined_room", { roomId });
+      console.log(`→ ${socket.id} joined room ${roomId}`);
+    } catch (err) {
+      console.error("Error in join_room handler:", err);
+      socket.emit("no_room_available");
+    }
+  });
+
   socket.on("setPlayerInfo", async data=>{
     const roomId = data.roomId;
     const state = rooms.get(roomId);
