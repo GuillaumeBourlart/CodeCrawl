@@ -1,8 +1,9 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { createAdapter } from "@socket.io/cluster-adapter";
-import { setupWorker } from "@socket.io/sticky";
+
+//import { createAdapter } from "@socket.io/cluster-adapter";
+//import { setupWorker } from "@socket.io/sticky";
 import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
 import dotenv from "dotenv";
