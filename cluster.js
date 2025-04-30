@@ -16,11 +16,10 @@ if (cluster.isMaster) {
     cluster.fork();
   });
 } else {
-  // Chaque worker importe **dynamiquement** le serveur
   import("./server.js")
     .then(() => console.log(`Worker ${process.pid} started server`))
     .catch(err => {
-      console.error("Impossible de démarrer le serveur dans le worker :", err);
+      console.error("Impossible de démarrer le serveur dans le worker :", err);
       process.exit(1);
     });
 }
