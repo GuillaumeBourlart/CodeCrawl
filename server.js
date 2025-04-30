@@ -28,7 +28,9 @@ const io = new Server(httpServer, { cors: { origin: "*" } });
 const skinCache = {};
 const scoreUpdates = {};  // clé : id du joueur, valeur : { pseudo, score }
 
-app.use(cors({ origin: "*" }));
+
+app.options("*", cors());
+
 app.use(express.json());
 
 // --- Configuration ---
