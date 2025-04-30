@@ -1,8 +1,8 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-+import { createAdapter } from "@socket.io/cluster-adapter";
-+import { setupWorker } from "@socket.io/sticky";
+import { createAdapter } from "@socket.io/cluster-adapter";
+import { setupWorker } from "@socket.io/sticky";
 import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
 
@@ -937,8 +937,5 @@ app.get("/globalLeaderboard", async (req, res) => {
   res.json(data);
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`Serveur démarré sur le port ${PORT}`);
-});
 
 
