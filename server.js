@@ -480,6 +480,23 @@ io.on("connection", socket => {
   console.log("client connected", socket.id);
   socket.on("ping_test", (_d, ack) => ack());
 
+   socket.on("disconnect", async () => {
+    const roomId = socketRooms.get(socket.id);
+    if (roomId) {
+      const state = rooms.get(roomId);
+      const p = state?.players[socket.id];
+      if (p) {
+        const h = boostIntervals.get(socket.id);
+        if (h) { clearInterval(h); boostIntervals.delete(socket.id); }
+        dropQueueItems(p, roomId);
+        scoreBuffer[socket.id] = { pseudo: p.pseudo||"Anonyme", score: p.itemEatenCount };
+       delete state.players[socket.id];
+        await leaveRoom(roomId);
+      }
+    }
+    socketRooms.delete(socket.id);
+  });
+
   socket.on("join_room", async () => {
     try {
       const roomDb = await findOrCreateRoom();
@@ -520,20 +537,25 @@ io.on("connection", socket => {
   });
 
   socket.on("setPlayerInfo", async data => {
-    const state = data?.roomId ?? socketRooms.get(socket.id);
+    // on récupère la roomId envoyée ou en fallback depuis socketRooms
+    const roomId = data?.roomId ?? socketRooms.get(socket.id);
     if (!roomId) return;
-    if (!state || !state.players[socket.id]) return;
-    const p = state.players[socket.id];
+   const state = rooms.get(roomId);
+   if (!state || !state.players[socket.id]) return;
+   const p = state.players[socket.id];
     p.pseudo = data.pseudo;
     p.skin_id = data.skin_id;
     p.skinColors = await getSkinDataFromDB(data.skin_id);
     p.color = p.skinColors[0];
   });
 
-  socket.on("changeDirection", data => {
-    const state = data?.roomId ?? socketRooms.get(socket.id);
+  
+
+   socket.on("changeDirection", data => {
+    const roomId = data?.roomId ?? socketRooms.get(socket.id);
     if (!roomId) return;
-    const p = state?.players[socket.id];
+    const state = rooms.get(roomId);
+   const p = state?.players[socket.id];
     if (!p) return;
     let { x, y } = data.direction;
     const mag = Math.hypot(x, y) || 1; x /= mag; y /= mag;
@@ -550,10 +572,11 @@ io.on("connection", socket => {
     p.direction = { x, y };
   });
 
-  socket.on("boostStart", data => {
-    const state = data?.roomId ?? socketRooms.get(socket.id);
+ socket.on("boostStart", data => {
+   const roomId = data?.roomId ?? socketRooms.get(socket.id);
   if (!roomId) return;
-    const p = state?.players[socket.id];
+  const state = rooms.get(roomId);
+   const p = state?.players[socket.id];
     if (!p || p.queue.length <= 6 || p.boosting) return;
     const seg = p.queue.pop();
     const r = randomRadius(), val = getItemValue(r);
@@ -581,22 +604,17 @@ io.on("connection", socket => {
     }
   });
 
-  socket.on("disconnect", async () => {
-    // clean up player in whichever room
-    for (const [rid, state] of rooms.entries()) {
-      if (state.players[socket.id]) {
-        const p = state.players[socket.id];
-        const h = boostIntervals.get(socket.id);
-        if (h) { clearInterval(h); boostIntervals.delete(socket.id); }
-        dropQueueItems(p, rid);
-        scoreBuffer[socket.id] = { pseudo: p.pseudo||"Anonyme", score: p.itemEatenCount };
-        delete state.players[socket.id];
-        await leaveRoom(rid);
-        break;
-      }
-    }
+  socket.on("boostStop", data => {
+    const h = boostIntervals.get(socket.id);
+    if (!h) return;
+    clearInterval(h);
+    boostIntervals.delete(socket.id);
+    const roomId = data?.roomId ?? socketRooms.get(socket.id);
+    if (!roomId) return;
+    const state = rooms.get(roomId);
+    const p = state?.players[socket.id];
+    if (p) p.boosting = false;
   });
-});
 
 httpServer.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
