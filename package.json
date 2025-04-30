@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Serveur Node pour un jeu snake.io-like avec Socket.io et Supabase",
   "type": "module",
-  "main": "cluster.js",
+  "main": "server.js",
 "scripts": {
  "start": "node server.js",
 "start:cluster": "node cluster.js"
